@@ -90,74 +90,111 @@ async def create_pending_subscription(db_user_id: int, product_id: int, mp_payme
         return None
 
 async def activate_subscription(mp_payment_id: str) -> dict | None:
-    """Ativa uma assinatura, definindo as datas de início e fim."""
+    """Ativa uma assinatura, definindo as datas de início e fim.
+       NOVO: Se o usuário já tiver uma assinatura ativa, estende a data de término."""
     if not supabase: return None
     try:
-        # 1. Busca a assinatura e o produto associado
-        sub_response = await asyncio.to_thread(
+        # 1. Busca a assinatura PENDENTE e o produto associado
+        pending_sub_response = await asyncio.to_thread(
             lambda: supabase.table('subscriptions')
-            .select('*, product:products(*)')
+            .select('*, user:users(*), product:products(*)') # Pega dados completos do usuário
             .eq('mp_payment_id', mp_payment_id)
             .single()
             .execute()
         )
-        if not sub_response.data:
+        if not pending_sub_response.data:
             logger.warning(f"⚠️ [DB] Assinatura com mp_payment_id {mp_payment_id} não encontrada para ativação.")
             return None
 
-        subscription = sub_response.data
+        subscription = pending_sub_response.data
         product = subscription.get('product')
+        user = subscription.get('user')
+
+        if not user or not product:
+            logger.error(f"❌ [DB] Dados de usuário ou produto ausentes para a assinatura com mp_payment_id {mp_payment_id}.")
+            return None
 
         if subscription.get('status') == 'active':
             logger.warning(f"⚠️ [DB] Assinatura {subscription['id']} já está ativa. Ignorando.")
-            # --- CORREÇÃO APLICADA AQUI ---
-            # Se já estiver ativa, precisamos buscar os dados do usuário para retornar
-            user_data_response = await asyncio.to_thread(
-                lambda: supabase.table('subscriptions')
-                .select('*, user:users(telegram_user_id)')
-                .eq('mp_payment_id', mp_payment_id)
-                .single()
-                .execute()
-            )
-            return user_data_response.data if user_data_response.data else None
+            # Retorna os dados necessários para o fluxo continuar sem erros
+            subscription['user'] = {'telegram_user_id': user.get('telegram_user_id')}
+            return subscription
 
 
-        # 2. Calcula as datas
-        start_date = datetime.now(TIMEZONE_BR)
-        end_date = None
-        if product and product.get('duration_days'):
-            end_date = start_date + timedelta(days=product['duration_days'])
+        # --- ### NOVA LÓGICA DE EXTENSÃO ### ---
 
-        # 3. Atualiza o registro
+        # 2. Verifica se o usuário já tem outra assinatura ATIVA
+        #    (Excluindo a que estamos prestes a ativar, pelo ID)
+        active_sub_response = await asyncio.to_thread(
+            lambda: supabase.table('subscriptions')
+            .select('id, end_date')
+            .eq('user_id', user['id'])
+            .eq('status', 'active')
+            .neq('id', subscription['id']) # Garante que não selecionamos a própria assinatura
+            .order('end_date', desc=True) # Pega a que vence mais tarde, caso haja múltiplas
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+
+        existing_active_sub = active_sub_response.data
+        start_date_base = datetime.now(TIMEZONE_BR) # Padrão: começa agora
+
+        if existing_active_sub and existing_active_sub.get('end_date'):
+            # Converte a data de término da assinatura antiga para um objeto datetime
+            old_end_date = datetime.fromisoformat(existing_active_sub['end_date']).astimezone(TIMEZONE_BR)
+            # Se a data antiga for no futuro, usamos ela como base para o cálculo
+            if old_end_date > start_date_base:
+                start_date_base = old_end_date
+                logger.info(f"✅ [DB] Estendendo assinatura para o usuário {user['id']}. Base de cálculo: {old_end_date.isoformat()}")
+
+        # 3. Calcula as novas datas com base na lógica acima
+        new_start_date = datetime.now(TIMEZONE_BR) # A data de início real é sempre hoje
+        duration_days = product.get('duration_days', 30)
+        new_end_date = start_date_base + timedelta(days=duration_days)
+
+        # --- ### FIM DA NOVA LÓGICA ### ---
+
+
+        # 4. Atualiza o registro da assinatura PENDENTE
         update_payload = {
             "status": "active",
-            "start_date": start_date.isoformat(),
-            "end_date": end_date.isoformat() if end_date else None
+            "start_date": new_start_date.isoformat(),
+            "end_date": new_end_date.isoformat() if new_end_date else None
         }
 
-        # --- CORREÇÃO APLICADA AQUI: SEPARAMOS UPDATE DO SELECT ---
-        # 3.1. Primeiro, apenas executamos a atualização.
+        # Primeiro, atualizamos a nova assinatura
         await asyncio.to_thread(
             lambda: supabase.table('subscriptions')
             .update(update_payload)
-            .eq('mp_payment_id', mp_payment_id)
+            .eq('id', subscription['id'])
             .execute()
         )
 
-        # 3.2. Agora, buscamos os dados atualizados em uma nova query.
+        # Opcional: Se estendemos uma assinatura, podemos desativar a antiga para evitar confusão
+        if existing_active_sub:
+            await asyncio.to_thread(
+                lambda: supabase.table('subscriptions')
+                .update({'status': 'extended'}) # Um novo status para clareza
+                .eq('id', existing_active_sub['id'])
+                .execute()
+            )
+
+
+        # 5. Retorna os dados atualizados para o fluxo principal
         final_data_response = await asyncio.to_thread(
             lambda: supabase.table('subscriptions')
-            .select('*, user:users(telegram_user_id)') # Retorna o tg_user_id
-            .eq('mp_payment_id', mp_payment_id)
-            .single() # Usamos single() pois esperamos apenas um resultado
+            .select('*, user:users(telegram_user_id)')
+            .eq('id', subscription['id'])
+            .single()
             .execute()
         )
 
-        logger.info(f"✅ [DB] Assinatura {subscription['id']} ativada para o pagamento {mp_payment_id}.")
+        logger.info(f"✅ [DB] Assinatura {subscription['id']} ativada/estendida para o pagamento {mp_payment_id}.")
         return final_data_response.data if final_data_response.data else None
 
     except Exception as e:
-        logger.error(f"❌ [DB] Erro ao ativar assinatura {mp_payment_id}: {e}", exc_info=True)
+        logger.error(f"❌ [DB] Erro ao ativar/estender assinatura {mp_payment_id}: {e}", exc_info=True)
         return None
 
 async def get_user_active_subscription(telegram_user_id: int) -> dict | None:
