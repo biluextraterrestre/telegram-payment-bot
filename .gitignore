@@ -1,0 +1,11 @@
+# Arquivos de ambiente
+.env
+INICIAR EXECUÇÃO.bat
+comandos_git.txt
+app - Copia.py
+senha supabase telegram-payment-bot.txt
+GRUPOS_CANAIS.txt
+
+# Cache do Python
+__pycache__/
+*.pyc
