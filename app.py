@@ -66,6 +66,45 @@ httpx_request = HTTPXRequest(**request_config)
 bot_app = Application.builder().token(TELEGRAM_BOT_TOKEN).request(httpx_request).job_queue(JobQueue()).build()
 app = Quart(__name__)
 
+# --- NOVA FUNÇÃO DE DEBUG ---
+async def test_animation_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Um comando de admin para testar o envio da animação de boas-vindas."""
+    # Carregamos os IDs de Admin aqui para manter a função autônoma
+    ADMIN_IDS_STR = os.getenv("ADMIN_USER_IDS", "")
+    ADMIN_IDS = [int(admin_id.strip()) for admin_id in ADMIN_IDS_STR.split(',')] if ADMIN_IDS_STR else []
+
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("Você não tem permissão para usar este comando.")
+        return
+
+    animation_id = os.getenv("WELCOME_ANIMATION_FILE_ID")
+    logger.info(f"[DEBUG] Comando /testanimation acionado. Tentando usar o file_id: '{animation_id}'")
+
+    if not animation_id:
+        await update.message.reply_text("A variável de ambiente WELCOME_ANIMATION_FILE_ID não está configurada.")
+        return
+
+    await update.message.reply_text(f"Tentando enviar a animação com o seguinte file_id:\n\n`{animation_id}`", parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        await context.bot.send_animation(
+            chat_id=user_id,
+            animation=animation_id,
+            caption="Se você vê esta animação, o file_id está correto!"
+        )
+        logger.info(f"[DEBUG] Animação de teste enviada com sucesso para o admin {user_id}.")
+    except BadRequest as e:
+        error_message = f"❌ FALHA ao enviar a animação.\n\n" \
+                        f"**Erro do Telegram:** `{e.message}`\n\n" \
+                        f"O file_id usado foi:\n`{animation_id}`\n\n" \
+                        "Verifique se o ID foi copiado corretamente, sem aspas ou espaços extras."
+        await update.message.reply_text(error_message, parse_mode=ParseMode.MARKDOWN)
+        logger.error(f"[DEBUG] Falha no /testanimation. Erro: {e.message}", exc_info=True)
+    except Exception as e:
+        await update.message.reply_text(f"Ocorreu um erro inesperado: {e}")
+        logger.error(f"[DEBUG] Erro inesperado no /testanimation: {e}", exc_info=True)
+
 
 # --- HANDLERS DE COMANDOS DO USUÁRIO ---
 
@@ -88,6 +127,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"*Bem-vindo ao nosso Bot VIP de Conteúdo Adulto (+18!)* 🔥\n\n" \
         f"Aqui, você acessa o *melhor* do entretenimento erótico premium, com canais exclusivos cheios de vídeos quentes e conteúdos que vão te deixar sem fôlego. Tudo administrado de forma *segura* e *discreta* pelo nosso bot – basta pagar uma taxa acessível e entrar no *paraíso do prazer ilimitado*!\n\n"
     )
+
+    # --- ADICIONANDO LOG DE DEBUG AQUI ---
+    logger.info(f"Função /start: Tentando enviar animação com file_id: '{WELCOME_ANIMATION_FILE_ID}'")
+    # --- FIM DO LOG DE DEBUG ---
 
     await update.message.reply_animation(  # <-- MUDANÇA AQUI
         animation=WELCOME_ANIMATION_FILE_ID, # <-- MUDANÇA AQUI
@@ -176,15 +219,6 @@ async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-
-async def get_file_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler temporário para obter file_id da animação"""
-    if update.message.animation:
-        file_id = update.message.animation.file_id
-        await update.message.reply_text(f"File ID da animação: `{file_id}`", parse_mode=ParseMode.MARKDOWN_V2)
-    elif update.message.video:
-        file_id = update.message.video.file_id
-        await update.message.reply_text(f"File ID do vídeo: `{file_id}`", parse_mode=ParseMode.MARKDOWN_V2)
 
 
 # --- HANDLER DE BOTÕES (CALLBACKQUERY) ---
@@ -314,8 +348,7 @@ bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CommandHandler("status", status_command))
 bot_app.add_handler(CommandHandler("renovar", renew_command))
 bot_app.add_handler(CommandHandler("suporte", support_command))
-bot_app.add_handler(CommandHandler("getfileid", get_file_id))
-# apareguei
+bot_app.add_handler(CommandHandler("testanimation", test_animation_command))
 
 # 3. Coloque o CallbackQueryHandler geral por ÚLTIMO.
 bot_app.add_handler(CallbackQueryHandler(button_handler))
