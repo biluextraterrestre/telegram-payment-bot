@@ -117,6 +117,58 @@ async def test_animation_command(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(f"Ocorreu um erro inesperado: {e}")
         logger.error(f"[DEBUG] Erro inesperado no /testanimation: {e}", exc_info=True)
 
+# --- NOVA FUNÇÃO UTILITÁRIA ---
+async def get_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Responde a uma mensagem com o file_id do anexo.
+    O usuário deve responder a uma mensagem que contém mídia com o comando /getid.
+    """
+    try:
+        replied_message = update.message.reply_to_message
+        if not replied_message:
+            await update.message.reply_text(
+                "Por favor, use este comando respondendo a uma mensagem que contenha uma foto, vídeo, GIF ou documento."
+            )
+            return
+
+        file_id = None
+        file_type = ""
+
+        if replied_message.animation:
+            file_id = replied_message.animation.file_id
+            file_type = "Animação (GIF)"
+        elif replied_message.photo:
+            # Pega a foto de maior resolução
+            file_id = replied_message.photo[-1].file_id
+            file_type = "Foto"
+        elif replied_message.video:
+            file_id = replied_message.video.file_id
+            file_type = "Vídeo"
+        elif replied_message.document:
+            file_id = replied_message.document.file_id
+            file_type = "Documento"
+        elif replied_message.sticker:
+            file_id = replied_message.sticker.file_id
+            file_type = "Sticker"
+
+        if file_id:
+            message = (
+                f"ℹ️ **Detalhes do Arquivo**\n\n"
+                f"**Tipo:** {file_type}\n"
+                f"**File ID:**\n"
+                f"```{file_id}```\n\n"
+                f"👆 Toque no ID acima para copiar."
+            )
+            await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+        else:
+            await update.message.reply_text(
+                "A mensagem respondida não parece conter uma mídia com um file_id que eu possa extrair."
+            )
+
+    except Exception as e:
+        logger.error(f"Erro no comando /getid: {e}", exc_info=True)
+        await update.message.reply_text(f"Ocorreu um erro ao processar o comando: {e}")
+
 
 # --- HANDLERS DE COMANDOS DO USUÁRIO ---
 
@@ -291,7 +343,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text(
             text=texto,
             parse_mode=ParseMode.MARKDOWN_V2 # Usamos a versão V2
+
         )
+
 # --- LÓGICA DE PAGAMENTO E ACESSO ---
 
 async def create_pix_payment(tg_user: TelegramUser, product: dict) -> dict | None:
@@ -361,6 +415,7 @@ bot_app.add_handler(CommandHandler("status", status_command))
 bot_app.add_handler(CommandHandler("renovar", renew_command))
 bot_app.add_handler(CommandHandler("suporte", support_command))
 bot_app.add_handler(CommandHandler("testanimation", test_animation_command))
+bot_app.add_handler(CommandHandler("getid", get_id_command))
 
 # 3. Coloque o CallbackQueryHandler geral por ÚLTIMO.
 bot_app.add_handler(CallbackQueryHandler(button_handler))
