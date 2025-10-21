@@ -49,7 +49,7 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, is_support_
             member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
             if member.status in ['member', 'administrator', 'creator']:
                 chat = await bot.get_chat(chat_id)
-                groups_already_in_text += f"✅ Você já é membro do grupo: *{chat.title}*\n"
+                groups_already_in_text += f"✅ Você já é membro do grupo: *{chat.title}*\n\n"
                 continue # Pula para o próximo grupo
             # ----------------------------------------------
 
@@ -61,7 +61,7 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, is_support_
             )
             chat = await bot.get_chat(chat_id)
             group_title = chat.title or f"Grupo {group_ids.index(chat_id) + 1}"
-            links_to_send_text += f"🔗 *{group_title}:* {link.invite_link}\n"
+            links_to_send_text += f"🔗 *{group_title}:* {link.invite_link}\n\n"
             new_links_generated += 1
 
         except Exception as e:
@@ -71,7 +71,7 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, is_support_
                     link = await bot.create_chat_invite_link(chat_id=chat_id, expire_date=expire_date, member_limit=1)
                     chat = await bot.get_chat(chat_id)
                     group_title = chat.title or f"Grupo {group_ids.index(chat_id) + 1}"
-                    links_to_send_text += f"🔗 *{group_title}:* {link.invite_link}\n"
+                    links_to_send_text += f"🔗 *{group_title}:* {link.invite_link}\n\n"
                     new_links_generated += 1
                 except Exception as inner_e:
                      logger.error(f"[JOB][{payment_id}] Erro interno ao criar link para o grupo {chat_id}: {inner_e}")
