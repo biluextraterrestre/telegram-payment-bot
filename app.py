@@ -85,7 +85,19 @@ async def test_animation_command(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("A variável de ambiente WELCOME_ANIMATION_FILE_ID não está configurada.")
         return
 
-    await update.message.reply_text(f"Tentando enviar a animação com o seguinte file_id:\n\n`{animation_id}`", parse_mode=ParseMode.MARKDOWN)
+    # --- CORREÇÃO APLICADA AQUI ---
+    # Escapamos caracteres que podem quebrar o MarkdownV2
+    # Telegram requer que estes caracteres sejam escapados: _ * [ ] ( ) ~ ` > # + - = | { } . !
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    escaped_animation_id = animation_id
+    for char in escape_chars:
+        escaped_animation_id = escaped_animation_id.replace(char, f'\\{char}')
+
+    await update.message.reply_text(
+        f"Tentando enviar a animação com o seguinte file\\_id:\n\n`{escaped_animation_id}`",
+        parse_mode=ParseMode.MARKDOWN_V2 # Usamos a versão V2 que é mais robusta
+    )
+    # --- FIM DA CORREÇÃO ---
 
     try:
         await context.bot.send_animation(
@@ -95,12 +107,12 @@ async def test_animation_command(update: Update, context: ContextTypes.DEFAULT_T
         )
         logger.info(f"[DEBUG] Animação de teste enviada com sucesso para o admin {user_id}.")
     except BadRequest as e:
-        error_message = f"❌ FALHA ao enviar a animação.\n\n" \
+        error_message = f"❌ **FALHA** ao enviar a animação\\.\n\n" \
                         f"**Erro do Telegram:** `{e.message}`\n\n" \
-                        f"O file_id usado foi:\n`{animation_id}`\n\n" \
-                        "Verifique se o ID foi copiado corretamente, sem aspas ou espaços extras."
-        await update.message.reply_text(error_message, parse_mode=ParseMode.MARKDOWN)
-        logger.error(f"[DEBUG] Falha no /testanimation. Erro: {e.message}", exc_info=True)
+                        f"O file\\_id usado foi:\n`{escaped_animation_id}`\n\n" \
+                        "Isso confirma que o `file_id` é inválido para este bot\\. Tente a alternativa da URL pública\\."
+        await update.message.reply_text(error_message, parse_mode=ParseMode.MARKDOWN_V2) # Também usar V2 aqui
+        logger.error(f"[DEBUG] Falha no /testanimation ao enviar a animação. Erro: {e.message}", exc_info=True)
     except Exception as e:
         await update.message.reply_text(f"Ocorreu um erro inesperado: {e}")
         logger.error(f"[DEBUG] Erro inesperado no /testanimation: {e}", exc_info=True)
