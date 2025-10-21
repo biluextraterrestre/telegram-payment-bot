@@ -4,6 +4,7 @@ import os
 import logging
 import asyncio
 from functools import wraps
+from datetime import datetime
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -171,7 +172,15 @@ async def grant_access_select_plan(update: Update, context: ContextTypes.DEFAULT
     telegram_user_id = context.user_data.get('grant_telegram_user_id')
     admin_id = update.effective_user.id
     await query.edit_message_text(text="Processando concessão...")
-    new_sub = await db.create_manual_subscription(db_user_id, product_id, f"manual_grant_by_admin_{admin_id}")
+
+    # --- ALTERAÇÃO AQUI ---
+    # Gera um identificador único para esta concessão manual usando um timestamp
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    unique_grant_id = f"manual_grant_by_admin_{admin_id}_{timestamp}"
+
+    new_sub = await db.create_manual_subscription(db_user_id, product_id, unique_grant_id)
+    # --- FIM DA ALTERAÇÃO ---
+
     if new_sub:
         await send_access_links(context.bot, telegram_user_id, new_sub.get('mp_payment_id', 'manual'))
         await query.edit_message_text(text=f"✅ Acesso concedido com sucesso para o usuário {telegram_user_id}! Os links foram enviados.")
