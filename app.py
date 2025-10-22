@@ -203,11 +203,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
     follow_up_message = (
-        f"*Confira o que te espera nos nossos canais VIP:*\n\n" \
-        f"- *CANAL SÓ ANAL*: Mergulhe em vídeos *intensos* e dedicados exclusivamente a sexo anal, com cenas *explosivas* que exploram o máximo do desejo!\n\n" \
-        f"- *CANAL VIP BRASIL*: As modelos brasileiras mais *famosas* e *badaladas* da web, exibindo todo o seu talento em produções nacionais de *alto nível*. Puro fogo tropical!\n\n" \
-        f"Por uma assinatura *única* e *barata*, você ganha acesso imediato a *todos esses canais*, com atualizações diárias. Pagamento fácil via PIX, e *total privacidade* garantida.\n\n" \
-        f"*Escolha seu plano de acesso:*"
+        f"*Descubra um mundo de prazer nos nossos canais VIP:*\n\n" \
+        f"- *ANAL PROFISSIONAL*: Vídeos *intensos* de sexo anal profissional, com cenas *explosivas* que vão despertar seus desejos mais profundos!\n\n" \
+        f"- *VIP BRASIL*: As brasileiras mais *quentes* e *famosas* da internet, mostrando talento e sensualidade em conteúdos *exclusivos*!\n\n" \
+        f"- *AMADORES*: Paixão crua e autêntica com casais e solos amadores, trazendo o calor de momentos *reais* e sem filtros!\n\n" \
+        f"- *VAZADOS*: Conteúdos *secretos* e *exclusivos*, com vazamentos que vão te surpreender e deixar com vontade de mais!\n\n" \
+        f"- *TRANS*: Beleza e sensualidade sem limites, com performances *arrojadas* que celebram a diversidade e o prazer!\n\n" \
+        f"- *COROAS (MILF)*: Mulheres maduras, *sedutoras* e experientes, entregando conteúdos que mostram que a idade só aumenta o fogo!\n\n" \
+        f"- *CORNOS (CUCKOLD)*: Fantasias *provocantes* de cuckold, com cenas de submissão e dominação que exploram o lado mais *ousado* do desejo!\n\n" \
+        f"- *TUFOS*: Animações picantes e excitantes envolvendo a família sacana!\n\n" \
+        f"Com uma assinatura mensal ou pagamento único, você desbloqueia *acesso total* a todos esses canais, com atualizações diárias. Pagamento seguro via PIX e *privacidade absoluta* garantida.\n\n" \
+        f"*Escolha seu plano e mergulhe no prazer hoje mesmo!*"
     )
 
 
