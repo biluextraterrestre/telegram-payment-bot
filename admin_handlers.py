@@ -57,7 +57,7 @@ PRODUCT_ID_MONTHLY = int(os.getenv("PRODUCT_ID_MONTHLY", 0))
     GETTING_COUPON_DISCOUNT,
     SEARCHING_TRANSACTIONS,
     GETTING_TRANSACTION_SEARCH,
-) = range(23)
+) = range(21)
 
 # --- DECORATOR DE SEGURANÇA ---
 def admin_only(func):
