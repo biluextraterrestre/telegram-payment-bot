@@ -1,4 +1,4 @@
-# --- admin_handlers.py (VERSÃO APRIMORADA COM NOVAS FUNCIONALIDADES) ---
+# --- admin_handlers.py (VERSÃO CORRIGIDA E COMPLETA) ---
 
 import os
 import logging
@@ -185,7 +185,6 @@ async def manage_groups_start(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = [
         [InlineKeyboardButton("➕ Adicionar Grupo", callback_data="group_add")],
         [InlineKeyboardButton("🗑️ Remover Grupo", callback_data="group_remove")],
-        [InlineKeyboardButton("✏️ Renomear Grupo", callback_data="group_rename")],
         [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -232,514 +231,7 @@ async def create_coupon_get_code(update: Update, context: ContextTypes.DEFAULT_T
         )
         return GETTING_COUPON_CODE
 
-    context.user_data['revoke_db_user_id'] = user_data['id']
-    context.user_data['revoke_telegram_user_id'] = user_data['telegram_user_id']
-
-    keyboard = [
-        [InlineKeyboardButton("✅ SIM, REVOGAR AGORA", callback_data="revoke_confirm")],
-        [InlineKeyboardButton("❌ NÃO, CANCELAR", callback_data="admin_back_to_menu")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await update.message.reply_text(
-        f"⚠️ *ATENÇÃO* ⚠️\n\n"
-        f"Você está prestes a revogar o acesso de *{user_data['first_name']}* (`{user_data['telegram_user_id']}`) "
-        f"e removê-lo(a) de todos os grupos.\n\n"
-        f"Esta ação é irreversível. Confirma?",
-        reply_markup=reply_markup,
-        parse_mode=ParseMode.MARKDOWN
-    )
-    return CONFIRMING_REVOKE
-
-@admin_only
-async def revoke_access_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("⏳ Processando revogação...")
-
-    db_user_id = context.user_data.get('revoke_db_user_id')
-    telegram_user_id = context.user_data.get('revoke_telegram_user_id')
-    admin_id = update.effective_user.id
-
-    success = await db.revoke_subscription(db_user_id, f"revoked_by_admin_{admin_id}")
-
-    if success:
-        # Registra o log
-        await db.create_log(
-            'admin_action',
-            f"Admin {admin_id} revogou acesso do usuário {telegram_user_id}"
-        )
-
-        removed_count = await scheduler.kick_user_from_all_groups(telegram_user_id, context.bot)
-        await query.edit_message_text(
-            f"✅ Acesso revogado com sucesso!\n\n"
-            f"👤 Usuário: {telegram_user_id}\n"
-            f"🚫 Removido de {removed_count} grupo(s)"
-        )
-
-        try:
-            await context.bot.send_message(
-                telegram_user_id,
-                "⚠️ Seu acesso foi revogado por um administrador.\n\n"
-                "Para mais informações, use /suporte."
-            )
-        except Exception as e:
-            logger.error(f"Erro ao notificar usuário {telegram_user_id}: {e}")
-    else:
-        await query.edit_message_text("❌ Falha ao revogar o acesso no banco de dados.")
-
-    context.user_data.clear()
-    return ConversationHandler.END
-
-# --- FLUXO: BROADCAST (mantido do original) ---
-@admin_only
-async def broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    keyboard = [[InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(
-        text="📢 Envie a mensagem que você deseja enviar a todos os usuários com assinatura ativa.\n\n"
-        "Você pode enviar texto, imagens, vídeos ou documentos.\nUse /cancel para abortar.",
-        reply_markup=reply_markup
-    )
-    return GETTING_BROADCAST_MESSAGE
-
-@admin_only
-async def broadcast_receive_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['broadcast_message'] = update.message
-
-    keyboard = [
-        [InlineKeyboardButton("✅ SIM, ENVIAR AGORA", callback_data="broadcast_confirm")],
-        [InlineKeyboardButton("❌ NÃO, CANCELAR", callback_data="admin_back_to_menu")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await update.message.reply_text(
-        "📋 Esta é a mensagem que será enviada.\n\n"
-        "⚠️ Será enviada para TODOS os usuários com assinatura ativa.\n\n"
-        "Você confirma o envio?",
-        reply_markup=reply_markup
-    )
-    return CONFIRMING_BROADCAST
-
-@admin_only
-async def broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-
-    message_to_send = context.user_data.get('broadcast_message')
-    if not message_to_send:
-        await query.edit_message_text("❌ Erro: Mensagem não encontrada. Operação cancelada.")
-        return ConversationHandler.END
-
-    await query.edit_message_text("📊 Buscando usuários... O envio começará em breve.")
-
-    user_ids = await db.get_all_active_tg_user_ids()
-    total_users = len(user_ids)
-
-    await query.edit_message_text(
-        f"📤 Iniciando envio para {total_users} usuários...\n\n"
-        f"⏱️ Tempo estimado: ~{total_users // 20} minutos\n\n"
-        f"Você receberá uma notificação quando concluir."
-    )
-
-    # Registra o log
-    await db.create_log(
-        'admin_action',
-        f"Admin {update.effective_user.id} iniciou broadcast para {total_users} usuários"
-    )
-
-    asyncio.create_task(
-        run_broadcast(context, message_to_send, user_ids, query.message.chat_id, query.message.message_id)
-    )
-
-    context.user_data.clear()
-    return ConversationHandler.END
-
-async def run_broadcast(context: ContextTypes.DEFAULT_TYPE, message_to_send, user_ids, admin_chat_id, admin_message_id):
-    """Executa o broadcast com controle de rate limit aprimorado."""
-    sent_count, failed_count, blocked_count = 0, 0, 0
-    total_users = len(user_ids)
-    start_time = datetime.now()
-
-    for i, user_id in enumerate(user_ids):
-        try:
-            await context.bot.copy_message(
-                chat_id=user_id,
-                from_chat_id=message_to_send.chat_id,
-                message_id=message_to_send.message_id
-            )
-            sent_count += 1
-
-            # Atualiza progresso a cada 50 mensagens
-            if i % 50 == 0 and i > 0:
-                elapsed = (datetime.now() - start_time).seconds
-                estimated_total = (elapsed / i) * total_users
-                remaining = estimated_total - elapsed
-
-                await context.bot.edit_message_text(
-                    chat_id=admin_chat_id,
-                    message_id=admin_message_id,
-                    text=f"📊 Progresso: {i}/{total_users}\n"
-                    f"✅ Enviados: {sent_count}\n"
-                    f"❌ Falhas: {failed_count}\n"
-                    f"🚫 Bloqueados: {blocked_count}\n\n"
-                    f"⏱️ Tempo restante: ~{remaining // 60} min"
-                )
-                await asyncio.sleep(3)  # Pausa para evitar limites
-            else:
-                await asyncio.sleep(0.5)
-
-        except RetryAfter as e:
-            logger.warning(f"Rate limit atingido. Pausando por {e.retry_after}s")
-            await context.bot.edit_message_text(
-                chat_id=admin_chat_id,
-                message_id=admin_message_id,
-                text=f"⏸️ Limite da API atingido.\n\n"
-                f"Pausando por {e.retry_after} segundos...\n"
-                f"Progresso: {i}/{total_users}"
-            )
-            await asyncio.sleep(e.retry_after)
-            # Tenta reenviar
-            try:
-                await context.bot.copy_message(
-                    chat_id=user_id,
-                    from_chat_id=message_to_send.chat_id,
-                    message_id=message_to_send.message_id
-                )
-                sent_count += 1
-            except (BadRequest, Forbidden):
-                failed_count += 1
-
-        except Forbidden:
-            blocked_count += 1
-        except BadRequest:
-            failed_count += 1
-        except Exception as e:
-            logger.error(f"Erro inesperado no broadcast para {user_id}: {e}")
-            failed_count += 1
-
-    elapsed_time = (datetime.now() - start_time).seconds
-
-    final_text = (
-        f"📢 *Broadcast Concluído!*\n\n"
-        f"📊 *Estatísticas:*\n"
-        f"✅ Enviados: {sent_count}\n"
-        f"🚫 Bloquearam o bot: {blocked_count}\n"
-        f"❌ Outras falhas: {failed_count}\n\n"
-        f"⏱️ Tempo total: {elapsed_time // 60} min {elapsed_time % 60}s\n"
-        f"📈 Taxa de sucesso: {(sent_count/total_users*100):.1f}%"
-    )
-
-    await context.bot.edit_message_text(
-        chat_id=admin_chat_id,
-        message_id=admin_message_id,
-        text=final_text,
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-    # Registra o resultado
-    await db.create_log(
-        'broadcast_complete',
-        f"Broadcast concluído: {sent_count}/{total_users} enviados"
-    )
-
-# --- FLUXO: ENVIAR LINK DE NOVO GRUPO (mantido do original) ---
-@admin_only
-async def grant_new_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("📊 Buscando grupos cadastrados...")
-
-    groups = await db.get_all_groups_with_names()
-
-    if not groups:
-        await query.edit_message_text(
-            "❌ Nenhum grupo encontrado no banco de dados.\n\n"
-            "Use 'Gerenciar Grupos' para cadastrar um grupo primeiro.",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")
-            ]])
-        )
-        return ConversationHandler.END
-
-    keyboard = []
-    for group in groups:
-        group_name = group.get('name', f"ID: {group['telegram_chat_id']}")
-        keyboard.append([
-            InlineKeyboardButton(
-                f"📁 {group_name}",
-                callback_data=f"new_group_select_{group['telegram_chat_id']}"
-            )
-        ])
-
-    keyboard.append([InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await query.edit_message_text(
-        "✉️ *Enviar Link de Novo Grupo*\n\n"
-        "Selecione o grupo para o qual deseja enviar convites a todos os assinantes ativos:",
-        reply_markup=reply_markup,
-        parse_mode=ParseMode.MARKDOWN
-    )
-    return SELECTING_NEW_GROUP
-
-@admin_only
-async def grant_new_group_select_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-
-    chat_id = int(query.data.split('_')[-1])
-    context.user_data['new_group_chat_id'] = chat_id
-
-    try:
-        chat = await context.bot.get_chat(chat_id)
-        group_name = chat.title
-    except Exception as e:
-        logger.error(f"Não foi possível obter informações do grupo {chat_id}: {e}")
-        group_name = f"ID {chat_id}"
-
-    keyboard = [
-        [InlineKeyboardButton("✅ SIM, ENVIAR CONVITES", callback_data="new_group_confirm")],
-        [InlineKeyboardButton("❌ NÃO, CANCELAR", callback_data="admin_back_to_menu")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    text = (
-        f"⚠️ *CONFIRMAÇÃO* ⚠️\n\n"
-        f"Você está prestes a enviar um convite para o grupo:\n"
-        f"📁 *{group_name}*\n\n"
-        f"Será enviado para *TODOS* os assinantes ativos.\n"
-        f"O bot verificará e *não enviará* o link para quem já for membro.\n\n"
-        f"Deseja continuar?"
-    )
-
-    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-    return CONFIRMING_NEW_GROUP_BROADCAST
-
-@admin_only
-async def grant_new_group_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-
-    chat_id = context.user_data.get('new_group_chat_id')
-    if not chat_id:
-        await query.edit_message_text("❌ Erro: ID do grupo não encontrado. Operação cancelada.")
-        return ConversationHandler.END
-
-    await query.edit_message_text("📊 Buscando usuários ativos... O envio começará em breve.")
-
-    user_ids = await db.get_all_active_tg_user_ids()
-    total_users = len(user_ids)
-
-    if total_users == 0:
-        await query.edit_message_text("❌ Nenhum usuário com assinatura ativa foi encontrado.")
-        return ConversationHandler.END
-
-    await query.edit_message_text(
-        f"📤 Iniciando envio de convites para {total_users} usuários...\n\n"
-        f"⏱️ Isso pode levar alguns minutos."
-    )
-
-    # Registra o log
-    await db.create_log(
-        'admin_action',
-        f"Admin {update.effective_user.id} iniciou envio de links do grupo {chat_id} para {total_users} usuários"
-    )
-
-    asyncio.create_task(
-        run_new_group_broadcast(context, chat_id, user_ids, query.message.chat_id, query.message.message_id)
-    )
-
-    context.user_data.clear()
-    return ConversationHandler.END
-
-async def run_new_group_broadcast(
-    context: ContextTypes.DEFAULT_TYPE,
-    chat_id: int,
-    user_ids: list[int],
-    admin_chat_id: int,
-    admin_message_id: int
-):
-    """Envia convites de grupo com verificação de membros e rate limit."""
-    sent_count = 0
-    failed_count = 0
-    already_member_count = 0
-    total_users = len(user_ids)
-    start_time = datetime.now()
-
-    try:
-        chat = await context.bot.get_chat(chat_id)
-        group_name = chat.title
-    except Exception:
-        group_name = f"o grupo (ID: {chat_id})"
-
-    for i, user_id in enumerate(user_ids):
-        try:
-            # Verifica se já é membro
-            member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-            if member.status in ['member', 'administrator', 'creator']:
-                already_member_count += 1
-                continue
-
-            # Gera e envia o link
-            link = await context.bot.create_chat_invite_link(chat_id=chat_id, member_limit=1)
-            message = (
-                f"✨ *Novo Grupo Disponível!*\n\n"
-                f"Como nosso assinante, você ganhou acesso ao grupo:\n"
-                f"📁 *{group_name}*\n\n"
-                f"Clique no link abaixo para entrar:\n"
-                f"{link.invite_link}\n\n"
-                f"⚠️ Este convite é pessoal e expira em breve!"
-            )
-
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=message,
-                parse_mode=ParseMode.MARKDOWN
-            )
-            sent_count += 1
-
-            # Atualiza progresso
-            if i % 30 == 0 and i > 0:
-                elapsed = (datetime.now() - start_time).seconds
-                await context.bot.edit_message_text(
-                    chat_id=admin_chat_id,
-                    message_id=admin_message_id,
-                    text=f"📊 Progresso: {i}/{total_users}\n"
-                    f"✅ Convites enviados: {sent_count}\n"
-                    f"👤 Já eram membros: {already_member_count}\n"
-                    f"❌ Falhas: {failed_count}\n\n"
-                    f"⏱️ Tempo decorrido: {elapsed // 60}m {elapsed % 60}s"
-                )
-                await asyncio.sleep(3)
-            else:
-                await asyncio.sleep(0.5)
-
-        except RetryAfter as e:
-            logger.warning(f"Rate limit no broadcast de grupo. Pausando {e.retry_after}s")
-            await asyncio.sleep(e.retry_after)
-        except (BadRequest, Forbidden):
-            failed_count += 1
-        except Exception as e:
-            logger.error(f"Erro ao processar usuário {user_id} para grupo {chat_id}: {e}")
-            failed_count += 1
-
-    elapsed_time = (datetime.now() - start_time).seconds
-
-    final_text = (
-        f"✉️ *Envio de Convites Concluído!*\n\n"
-        f"📁 *Grupo:* {group_name}\n"
-        f"👥 *Total de assinantes:* {total_users}\n"
-        f"-----------------------------------\n"
-        f"✅ *Convites enviados:* {sent_count}\n"
-        f"👤 *Já eram membros:* {already_member_count}\n"
-        f"❌ *Falhas:* {failed_count}\n\n"
-        f"⏱️ *Tempo total:* {elapsed_time // 60}m {elapsed_time % 60}s\n"
-        f"📈 *Taxa de sucesso:* {(sent_count/(total_users-already_member_count)*100) if (total_users-already_member_count) > 0 else 0:.1f}%"
-    )
-
-    await context.bot.edit_message_text(
-        chat_id=admin_chat_id,
-        message_id=admin_message_id,
-        text=final_text,
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-# --- CANCELAR E CONVERSATION HANDLER ---
-@admin_only
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text = "❌ Operação cancelada."
-
-    if update.callback_query:
-        await update.callback_query.answer()
-        await update.callback_query.edit_message_text(text=text)
-    elif update.message:
-        await update.message.reply_text(text)
-
-    context.user_data.clear()
-    return ConversationHandler.END
-
-def get_admin_conversation_handler() -> ConversationHandler:
-    """Retorna o ConversationHandler aprimorado com todas as funcionalidades."""
-    return ConversationHandler(
-        entry_points=[CommandHandler("admin", admin_panel)],
-        states={
-            SELECTING_ACTION: [
-                CallbackQueryHandler(view_stats, pattern="^admin_stats$"),
-                CallbackQueryHandler(check_user_start, pattern="^admin_check_user$"),
-                CallbackQueryHandler(grant_access_start, pattern="^admin_grant_access$"),
-                CallbackQueryHandler(revoke_access_start, pattern="^admin_revoke_access$"),
-                CallbackQueryHandler(broadcast_start, pattern="^admin_broadcast$"),
-                CallbackQueryHandler(grant_new_group_start, pattern="^admin_grant_new_group$"),
-                CallbackQueryHandler(manage_groups_start, pattern="^admin_manage_groups$"),
-                CallbackQueryHandler(create_coupon_start, pattern="^admin_create_coupon$"),
-                CallbackQueryHandler(view_logs, pattern="^admin_view_logs$"),
-                CallbackQueryHandler(search_transactions_start, pattern="^admin_transactions$"),
-                CallbackQueryHandler(cancel, pattern="^admin_cancel$"),
-            ],
-            GETTING_USER_ID_FOR_CHECK: [
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, check_user_receive_id)
-            ],
-            GETTING_USER_ID_FOR_GRANT: [
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, grant_access_receive_id)
-            ],
-            SELECTING_PLAN_FOR_GRANT: [
-                CallbackQueryHandler(grant_access_select_plan, pattern="^grant_plan_"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$")
-            ],
-            GETTING_USER_ID_FOR_REVOKE: [
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, revoke_access_receive_id)
-            ],
-            CONFIRMING_REVOKE: [
-                CallbackQueryHandler(revoke_access_confirm, pattern="^revoke_confirm$"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$")
-            ],
-            GETTING_BROADCAST_MESSAGE: [
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-                MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO | filters.Document.ALL) & ~filters.COMMAND, broadcast_receive_message)
-            ],
-            CONFIRMING_BROADCAST: [
-                CallbackQueryHandler(broadcast_confirm, pattern="^broadcast_confirm$"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$")
-            ],
-            SELECTING_NEW_GROUP: [
-                CallbackQueryHandler(grant_new_group_select_group, pattern="^new_group_select_"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$")
-            ],
-            CONFIRMING_NEW_GROUP_BROADCAST: [
-                CallbackQueryHandler(grant_new_group_confirm, pattern="^new_group_confirm$"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$")
-            ],
-            MANAGING_GROUPS: [
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-                # Adicionar handlers específicos para gerenciamento de grupos
-            ],
-            GETTING_COUPON_CODE: [
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_code)
-            ],
-            GETTING_COUPON_DISCOUNT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_discount)
-            ],
-            GETTING_TRANSACTION_SEARCH: [
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, search_transactions_execute)
-            ],
-        },
-        fallbacks=[
-            CommandHandler("cancel", cancel),
-            CommandHandler("admin", admin_panel)
-        ],
-        per_user=True,
-        per_chat=True,
-    )
-
-# --- FIM DO ARQUIVO ---.user_data['coupon_code'] = code
+    context.user_data['coupon_code'] = code
 
     await update.message.reply_text(
         f"✅ Código: *{code}*\n\n"
@@ -789,7 +281,7 @@ async def create_coupon_get_discount(update: Update, context: ContextTypes.DEFAU
 
     except ValueError as e:
         await update.message.reply_text(
-            f"❌ {str(e)}. Formato correto: 10% ou R$5"
+            f"❌ Erro de formato. Use, por exemplo: `10%` ou `R$5`"
         )
         return GETTING_COUPON_DISCOUNT
 
@@ -1084,4 +576,512 @@ async def revoke_access_receive_id(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text("Este usuário não possui uma assinatura ativa para revogar.")
         return ConversationHandler.END
 
-    context
+    context.user_data['revoke_db_user_id'] = user_data['id']
+    context.user_data['revoke_telegram_user_id'] = user_data['telegram_user_id']
+
+    keyboard = [
+        [InlineKeyboardButton("✅ SIM, REVOGAR AGORA", callback_data="revoke_confirm")],
+        [InlineKeyboardButton("❌ NÃO, CANCELAR", callback_data="admin_back_to_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        f"⚠️ *ATENÇÃO* ⚠️\n\n"
+        f"Você está prestes a revogar o acesso de *{user_data['first_name']}* (`{user_data['telegram_user_id']}`) "
+        f"e removê-lo(a) de todos os grupos.\n\n"
+        f"Esta ação é irreversível. Confirma?",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+    return CONFIRMING_REVOKE
+
+@admin_only
+async def revoke_access_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("⏳ Processando revogação...")
+
+    db_user_id = context.user_data.get('revoke_db_user_id')
+    telegram_user_id = context.user_data.get('revoke_telegram_user_id')
+    admin_id = update.effective_user.id
+
+    success = await db.revoke_subscription(db_user_id, f"revoked_by_admin_{admin_id}")
+
+    if success:
+        # Registra o log
+        await db.create_log(
+            'admin_action',
+            f"Admin {admin_id} revogou acesso do usuário {telegram_user_id}"
+        )
+
+        removed_count = await scheduler.kick_user_from_all_groups(telegram_user_id, context.bot)
+        await query.edit_message_text(
+            f"✅ Acesso revogado com sucesso!\n\n"
+            f"👤 Usuário: {telegram_user_id}\n"
+            f"🚫 Removido de {removed_count} grupo(s)"
+        )
+
+        try:
+            await context.bot.send_message(
+                telegram_user_id,
+                "⚠️ Seu acesso foi revogado por um administrador.\n\n"
+                "Para mais informações, use /suporte."
+            )
+        except Exception as e:
+            logger.error(f"Erro ao notificar usuário {telegram_user_id}: {e}")
+    else:
+        await query.edit_message_text("❌ Falha ao revogar o acesso no banco de dados.")
+
+    context.user_data.clear()
+    return ConversationHandler.END
+
+# --- FLUXO: BROADCAST (mantido do original) ---
+@admin_only
+async def broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    keyboard = [[InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        text="📢 Envie a mensagem que você deseja enviar a todos os usuários com assinatura ativa.\n\n"
+        "Você pode enviar texto, imagens, vídeos ou documentos.\nUse /cancel para abortar.",
+        reply_markup=reply_markup
+    )
+    return GETTING_BROADCAST_MESSAGE
+
+@admin_only
+async def broadcast_receive_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data['broadcast_message'] = update.message
+
+    keyboard = [
+        [InlineKeyboardButton("✅ SIM, ENVIAR AGORA", callback_data="broadcast_confirm")],
+        [InlineKeyboardButton("❌ NÃO, CANCELAR", callback_data="admin_back_to_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "📋 Esta é a mensagem que será enviada.\n\n"
+        "⚠️ Será enviada para TODOS os usuários com assinatura ativa.\n\n"
+        "Você confirma o envio?",
+        reply_markup=reply_markup
+    )
+    return CONFIRMING_BROADCAST
+
+@admin_only
+async def broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    message_to_send = context.user_data.get('broadcast_message')
+    if not message_to_send:
+        await query.edit_message_text("❌ Erro: Mensagem não encontrada. Operação cancelada.")
+        return ConversationHandler.END
+
+    await query.edit_message_text("📊 Buscando usuários... O envio começará em breve.")
+
+    user_ids = await db.get_all_active_tg_user_ids()
+    total_users = len(user_ids)
+
+    await query.edit_message_text(
+        f"📤 Iniciando envio para {total_users} usuários...\n\n"
+        f"⏱️ Tempo estimado: ~{total_users // 20} minutos\n\n"
+        f"Você receberá uma notificação quando concluir."
+    )
+
+    # Registra o log
+    await db.create_log(
+        'admin_action',
+        f"Admin {update.effective_user.id} iniciou broadcast para {total_users} usuários"
+    )
+
+    asyncio.create_task(
+        run_broadcast(context, message_to_send, user_ids, query.message.chat_id, query.message.message_id)
+    )
+
+    context.user_data.clear()
+    return ConversationHandler.END
+
+async def run_broadcast(context: ContextTypes.DEFAULT_TYPE, message_to_send, user_ids, admin_chat_id, admin_message_id):
+    """Executa o broadcast com controle de rate limit aprimorado."""
+    sent_count, failed_count, blocked_count = 0, 0, 0
+    total_users = len(user_ids)
+    start_time = datetime.now()
+
+    for i, user_id in enumerate(user_ids):
+        try:
+            await context.bot.copy_message(
+                chat_id=user_id,
+                from_chat_id=message_to_send.chat_id,
+                message_id=message_to_send.message_id
+            )
+            sent_count += 1
+
+            # Atualiza progresso a cada 50 mensagens
+            if i % 50 == 0 and i > 0:
+                elapsed = (datetime.now() - start_time).seconds
+                estimated_total = (elapsed / i) * total_users if i > 0 else 0
+                remaining = estimated_total - elapsed
+
+                await context.bot.edit_message_text(
+                    chat_id=admin_chat_id,
+                    message_id=admin_message_id,
+                    text=f"📊 Progresso: {i}/{total_users}\n"
+                    f"✅ Enviados: {sent_count}\n"
+                    f"❌ Falhas: {failed_count}\n"
+                    f"🚫 Bloqueados: {blocked_count}\n\n"
+                    f"⏱️ Tempo restante: ~{int(remaining // 60)} min"
+                )
+                await asyncio.sleep(3)  # Pausa para evitar limites
+            else:
+                await asyncio.sleep(0.5)
+
+        except RetryAfter as e:
+            logger.warning(f"Rate limit atingido. Pausando por {e.retry_after}s")
+            await context.bot.edit_message_text(
+                chat_id=admin_chat_id,
+                message_id=admin_message_id,
+                text=f"⏸️ Limite da API atingido.\n\n"
+                f"Pausando por {e.retry_after} segundos...\n"
+                f"Progresso: {i}/{total_users}"
+            )
+            await asyncio.sleep(e.retry_after)
+            # Tenta reenviar
+            try:
+                await context.bot.copy_message(
+                    chat_id=user_id,
+                    from_chat_id=message_to_send.chat_id,
+                    message_id=message_to_send.message_id
+                )
+                sent_count += 1
+            except (BadRequest, Forbidden):
+                failed_count += 1
+
+        except Forbidden:
+            blocked_count += 1
+        except BadRequest:
+            failed_count += 1
+        except Exception as e:
+            logger.error(f"Erro inesperado no broadcast para {user_id}: {e}")
+            failed_count += 1
+
+    elapsed_time = (datetime.now() - start_time).seconds
+
+    final_text = (
+        f"📢 *Broadcast Concluído!*\n\n"
+        f"📊 *Estatísticas:*\n"
+        f"✅ Enviados: {sent_count}\n"
+        f"🚫 Bloquearam o bot: {blocked_count}\n"
+        f"❌ Outras falhas: {failed_count}\n\n"
+        f"⏱️ Tempo total: {elapsed_time // 60} min {elapsed_time % 60}s\n"
+        f"📈 Taxa de sucesso: {(sent_count/total_users*100):.1f}%"
+    )
+
+    await context.bot.edit_message_text(
+        chat_id=admin_chat_id,
+        message_id=admin_message_id,
+        text=final_text,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    # Registra o resultado
+    await db.create_log(
+        'broadcast_complete',
+        f"Broadcast concluído: {sent_count}/{total_users} enviados"
+    )
+
+# --- FLUXO: ENVIAR LINK DE NOVO GRUPO (mantido do original) ---
+@admin_only
+async def grant_new_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("📊 Buscando grupos cadastrados...")
+
+    groups = await db.get_all_groups_with_names()
+
+    if not groups:
+        await query.edit_message_text(
+            "❌ Nenhum grupo encontrado no banco de dados.\n\n"
+            "Use 'Gerenciar Grupos' para cadastrar um grupo primeiro.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")
+            ]])
+        )
+        return ConversationHandler.END
+
+    keyboard = []
+    for group in groups:
+        group_name = group.get('name', f"ID: {group['telegram_chat_id']}")
+        keyboard.append([
+            InlineKeyboardButton(
+                f"📁 {group_name}",
+                callback_data=f"new_group_select_{group['telegram_chat_id']}"
+            )
+        ])
+
+    keyboard.append([InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        "✉️ *Enviar Link de Novo Grupo*\n\n"
+        "Selecione o grupo para o qual deseja enviar convites a todos os assinantes ativos:",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+    return SELECTING_NEW_GROUP
+
+@admin_only
+async def grant_new_group_select_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    chat_id = int(query.data.split('_')[-1])
+    context.user_data['new_group_chat_id'] = chat_id
+
+    try:
+        chat = await context.bot.get_chat(chat_id)
+        group_name = chat.title
+    except Exception as e:
+        logger.error(f"Não foi possível obter informações do grupo {chat_id}: {e}")
+        group_name = f"ID {chat_id}"
+
+    keyboard = [
+        [InlineKeyboardButton("✅ SIM, ENVIAR CONVITES", callback_data="new_group_confirm")],
+        [InlineKeyboardButton("❌ NÃO, CANCELAR", callback_data="admin_back_to_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    text = (
+        f"⚠️ *CONFIRMAÇÃO* ⚠️\n\n"
+        f"Você está prestes a enviar um convite para o grupo:\n"
+        f"📁 *{group_name}*\n\n"
+        f"Será enviado para *TODOS* os assinantes ativos.\n"
+        f"O bot verificará e *não enviará* o link para quem já for membro.\n\n"
+        f"Deseja continuar?"
+    )
+
+    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    return CONFIRMING_NEW_GROUP_BROADCAST
+
+@admin_only
+async def grant_new_group_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    chat_id = context.user_data.get('new_group_chat_id')
+    if not chat_id:
+        await query.edit_message_text("❌ Erro: ID do grupo não encontrado. Operação cancelada.")
+        return ConversationHandler.END
+
+    await query.edit_message_text("📊 Buscando usuários ativos... O envio começará em breve.")
+
+    user_ids = await db.get_all_active_tg_user_ids()
+    total_users = len(user_ids)
+
+    if total_users == 0:
+        await query.edit_message_text("❌ Nenhum usuário com assinatura ativa foi encontrado.")
+        return ConversationHandler.END
+
+    await query.edit_message_text(
+        f"📤 Iniciando envio de convites para {total_users} usuários...\n\n"
+        f"⏱️ Isso pode levar alguns minutos."
+    )
+
+    # Registra o log
+    await db.create_log(
+        'admin_action',
+        f"Admin {update.effective_user.id} iniciou envio de links do grupo {chat_id} para {total_users} usuários"
+    )
+
+    asyncio.create_task(
+        run_new_group_broadcast(context, chat_id, user_ids, query.message.chat_id, query.message.message_id)
+    )
+
+    context.user_data.clear()
+    return ConversationHandler.END
+
+async def run_new_group_broadcast(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    user_ids: list[int],
+    admin_chat_id: int,
+    admin_message_id: int
+):
+    """Envia convites de grupo com verificação de membros e rate limit."""
+    sent_count = 0
+    failed_count = 0
+    already_member_count = 0
+    total_users = len(user_ids)
+    start_time = datetime.now()
+
+    try:
+        chat = await context.bot.get_chat(chat_id)
+        group_name = chat.title
+    except Exception:
+        group_name = f"o grupo (ID: {chat_id})"
+
+    for i, user_id in enumerate(user_ids):
+        try:
+            # Verifica se já é membro
+            member_status = (await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)).status
+            if member_status in ['member', 'administrator', 'creator']:
+                already_member_count += 1
+                continue
+
+            # Gera e envia o link
+            link = await context.bot.create_chat_invite_link(chat_id=chat_id, member_limit=1)
+            message = (
+                f"✨ *Novo Grupo Disponível!*\n\n"
+                f"Como nosso assinante, você ganhou acesso ao grupo:\n"
+                f"📁 *{group_name}*\n\n"
+                f"Clique no link abaixo para entrar:\n"
+                f"{link.invite_link}\n\n"
+                f"⚠️ Este convite é pessoal e expira em breve!"
+            )
+
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=message,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            sent_count += 1
+
+            # Atualiza progresso
+            if i % 30 == 0 and i > 0:
+                elapsed = (datetime.now() - start_time).seconds
+                await context.bot.edit_message_text(
+                    chat_id=admin_chat_id,
+                    message_id=admin_message_id,
+                    text=f"📊 Progresso: {i}/{total_users}\n"
+                    f"✅ Convites enviados: {sent_count}\n"
+                    f"👤 Já eram membros: {already_member_count}\n"
+                    f"❌ Falhas: {failed_count}\n\n"
+                    f"⏱️ Tempo decorrido: {elapsed // 60}m {elapsed % 60}s"
+                )
+                await asyncio.sleep(3)
+            else:
+                await asyncio.sleep(0.5)
+
+        except RetryAfter as e:
+            logger.warning(f"Rate limit no broadcast de grupo. Pausando {e.retry_after}s")
+            await asyncio.sleep(e.retry_after)
+        except (BadRequest, Forbidden):
+            failed_count += 1
+        except Exception as e:
+            logger.error(f"Erro ao processar usuário {user_id} para grupo {chat_id}: {e}")
+            failed_count += 1
+
+    elapsed_time = (datetime.now() - start_time).seconds
+    denominator = total_users - already_member_count
+    success_rate = (sent_count / denominator * 100) if denominator > 0 else 0
+
+    final_text = (
+        f"✉️ *Envio de Convites Concluído!*\n\n"
+        f"📁 *Grupo:* {group_name}\n"
+        f"👥 *Total de assinantes:* {total_users}\n"
+        f"-----------------------------------\n"
+        f"✅ *Convites enviados:* {sent_count}\n"
+        f"👤 *Já eram membros:* {already_member_count}\n"
+        f"❌ *Falhas:* {failed_count}\n\n"
+        f"⏱️ *Tempo total:* {elapsed_time // 60}m {elapsed_time % 60}s\n"
+        f"📈 *Taxa de sucesso:* {success_rate:.1f}%"
+    )
+
+    await context.bot.edit_message_text(
+        chat_id=admin_chat_id,
+        message_id=admin_message_id,
+        text=final_text,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+# --- CANCELAR E CONVERSATION HANDLER ---
+@admin_only
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    text = "❌ Operação cancelada."
+
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(text=text)
+    elif update.message:
+        await update.message.reply_text(text)
+
+    context.user_data.clear()
+    return ConversationHandler.END
+
+def get_admin_conversation_handler() -> ConversationHandler:
+    """Retorna o ConversationHandler aprimorado com todas as funcionalidades."""
+    return ConversationHandler(
+        entry_points=[CommandHandler("admin", admin_panel)],
+        states={
+            SELECTING_ACTION: [
+                CallbackQueryHandler(view_stats, pattern="^admin_stats$"),
+                CallbackQueryHandler(check_user_start, pattern="^admin_check_user$"),
+                CallbackQueryHandler(grant_access_start, pattern="^admin_grant_access$"),
+                CallbackQueryHandler(revoke_access_start, pattern="^admin_revoke_access$"),
+                CallbackQueryHandler(broadcast_start, pattern="^admin_broadcast$"),
+                CallbackQueryHandler(grant_new_group_start, pattern="^admin_grant_new_group$"),
+                CallbackQueryHandler(manage_groups_start, pattern="^admin_manage_groups$"),
+                CallbackQueryHandler(create_coupon_start, pattern="^admin_create_coupon$"),
+                CallbackQueryHandler(view_logs, pattern="^admin_view_logs$"),
+                CallbackQueryHandler(search_transactions_start, pattern="^admin_transactions$"),
+                CallbackQueryHandler(cancel, pattern="^admin_cancel$"),
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
+            ],
+            GETTING_USER_ID_FOR_CHECK: [
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, check_user_receive_id)
+            ],
+            GETTING_USER_ID_FOR_GRANT: [
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, grant_access_receive_id)
+            ],
+            SELECTING_PLAN_FOR_GRANT: [
+                CallbackQueryHandler(grant_access_select_plan, pattern="^grant_plan_"),
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$")
+            ],
+            GETTING_USER_ID_FOR_REVOKE: [
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, revoke_access_receive_id)
+            ],
+            CONFIRMING_REVOKE: [
+                CallbackQueryHandler(revoke_access_confirm, pattern="^revoke_confirm$"),
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$")
+            ],
+            GETTING_BROADCAST_MESSAGE: [
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
+                MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO | filters.Document.ALL) & ~filters.COMMAND, broadcast_receive_message)
+            ],
+            CONFIRMING_BROADCAST: [
+                CallbackQueryHandler(broadcast_confirm, pattern="^broadcast_confirm$"),
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$")
+            ],
+            SELECTING_NEW_GROUP: [
+                CallbackQueryHandler(grant_new_group_select_group, pattern="^new_group_select_"),
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$")
+            ],
+            CONFIRMING_NEW_GROUP_BROADCAST: [
+                CallbackQueryHandler(grant_new_group_confirm, pattern="^new_group_confirm$"),
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$")
+            ],
+            MANAGING_GROUPS: [
+                # Adicionar handlers específicos para add/remove/rename grupos aqui
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
+            ],
+            GETTING_COUPON_CODE: [
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_code)
+            ],
+            GETTING_COUPON_DISCOUNT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_discount)
+            ],
+            GETTING_TRANSACTION_SEARCH: [
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, search_transactions_execute)
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CommandHandler("admin", admin_panel)
+        ],
+        per_user=True,
+        per_chat=True,
+    )
