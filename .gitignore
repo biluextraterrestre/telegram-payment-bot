@@ -2,9 +2,10 @@
 .env
 INICIAR EXECUÇÃO.bat
 comandos_git.txt
-app - Copia.py
+app_app.py
 senha supabase telegram-payment-bot.txt
 GRUPOS_CANAIS.txt
+backup/
 
 # Cache do Python
 __pycache__/
