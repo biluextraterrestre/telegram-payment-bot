@@ -1,4 +1,4 @@
-# --- admin_handlers.py (VERSÃO CORRIGIDA E COMPLETA) ---
+# --- admin_handlers.py (VERSÃO APRIMORADA COM NOVAS FUNCIONALIDADES) ---
 
 import os
 import logging
@@ -55,9 +55,12 @@ PRODUCT_ID_MONTHLY = int(os.getenv("PRODUCT_ID_MONTHLY", 0))
     CREATING_COUPON,
     GETTING_COUPON_CODE,
     GETTING_COUPON_DISCOUNT,
+    GETTING_COUPON_VALIDITY,  # NOVO
+    GETTING_COUPON_USAGE_LIMIT,  # NOVO
+    MANAGING_COUPONS,  # NOVO
     SEARCHING_TRANSACTIONS,
     GETTING_TRANSACTION_SEARCH,
-) = range(21)
+) = range(25)  # Atualizado para 25 estados
 
 # --- DECORATOR DE SEGURANÇA ---
 def admin_only(func):
@@ -90,7 +93,7 @@ async def show_main_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYP
         ],
         [
             InlineKeyboardButton("🏢 Gerenciar Grupos", callback_data="admin_manage_groups"),
-            InlineKeyboardButton("🎟️ Criar Cupom", callback_data="admin_create_coupon")
+            InlineKeyboardButton("🎟️ Cupons", callback_data="admin_manage_coupons")
         ],
         [
             InlineKeyboardButton("📝 Ver Logs", callback_data="admin_view_logs"),
@@ -185,6 +188,7 @@ async def manage_groups_start(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = [
         [InlineKeyboardButton("➕ Adicionar Grupo", callback_data="group_add")],
         [InlineKeyboardButton("🗑️ Remover Grupo", callback_data="group_remove")],
+        [InlineKeyboardButton("✏️ Renomear Grupo", callback_data="group_rename")],
         [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -192,14 +196,70 @@ async def manage_groups_start(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     return MANAGING_GROUPS
 
-# --- NOVA FUNCIONALIDADE: CRIAR CUPOM ---
+# --- NOVA FUNCIONALIDADE: GERENCIAR CUPONS ---
+@admin_only
+async def manage_coupons_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Mostra opções de gerenciamento de cupons."""
+    query = update.callback_query
+    await query.answer()
+
+    await query.edit_message_text("📊 Carregando cupons...")
+
+    coupons = await db.get_all_coupons(include_inactive=True)
+
+    text = f"🎟️ *Gerenciamento de Cupons*\n\n📊 Total de cupons: {len(coupons)}\n\n"
+
+    if coupons:
+        active = [c for c in coupons if c.get('is_active')]
+        inactive = [c for c in coupons if not c.get('is_active')]
+
+        text += f"✅ Ativos: {len(active)}\n❌ Inativos: {len(inactive)}\n\n"
+        text += "*Cupons cadastrados:*\n\n"
+
+        for coupon in coupons[:10]:  # Mostra até 10
+            code = coupon.get('code', 'N/A')
+            status_emoji = "✅" if coupon.get('is_active') else "❌"
+            discount_type = coupon.get('discount_type')
+            discount_value = coupon.get('discount_value')
+            usage_count = coupon.get('usage_count', 0)
+            usage_limit = coupon.get('usage_limit')
+
+            if discount_type == 'percentage':
+                discount_text = f"{discount_value}%"
+            else:
+                discount_text = f"R$ {discount_value:.2f}"
+
+            usage_text = f"{usage_count}"
+            if usage_limit:
+                usage_text += f"/{usage_limit}"
+
+            text += f"{status_emoji} `{code}` - {discount_text} - Usos: {usage_text}\n"
+
+        if len(coupons) > 10:
+            text += f"\n... e mais {len(coupons) - 10} cupons"
+    else:
+        text += "Nenhum cupom cadastrado ainda."
+
+    keyboard = [
+        [InlineKeyboardButton("➕ Criar Novo Cupom", callback_data="coupon_create")],
+        [InlineKeyboardButton("📋 Listar Todos", callback_data="coupon_list_all")],
+        [InlineKeyboardButton("🔴 Desativar Cupom", callback_data="coupon_deactivate")],
+        [InlineKeyboardButton("🟢 Reativar Cupom", callback_data="coupon_reactivate")],
+        [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    return MANAGING_COUPONS
+
+# --- NOVA FUNCIONALIDADE: CRIAR CUPOM COM VALIDADE ---
 @admin_only
 async def create_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Inicia o processo de criação de cupom."""
     query = update.callback_query
     await query.answer()
 
-    keyboard = [[InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")]]
+    keyboard = [[InlineKeyboardButton("⬅️ Voltar", callback_data="admin_manage_coupons")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
@@ -236,17 +296,16 @@ async def create_coupon_get_code(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text(
         f"✅ Código: *{code}*\n\n"
         "Agora envie o valor do desconto:\n"
-        "• Para porcentagem: 10% ou 20%\n"
-        "• Para valor fixo: R$5 ou R$10",
+        "• Para porcentagem: `10%` ou `20%`\n"
+        "• Para valor fixo: `R$5` ou `R$10`",
         parse_mode=ParseMode.MARKDOWN
     )
     return GETTING_COUPON_DISCOUNT
 
 @admin_only
 async def create_coupon_get_discount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recebe o valor do desconto e cria o cupom."""
+    """Recebe o valor do desconto."""
     discount_text = update.message.text.strip()
-    code = context.user_data.get('coupon_code')
 
     try:
         # Parse do desconto
@@ -263,15 +322,145 @@ async def create_coupon_get_discount(update: Update, context: ContextTypes.DEFAU
         else:
             raise ValueError("Formato inválido")
 
-        # Cria o cupom
-        coupon = await db.create_coupon(code, discount_type, discount_value)
+        context.user_data['coupon_discount_type'] = discount_type
+        context.user_data['coupon_discount_value'] = discount_value
+
+        # Pergunta sobre validade
+        await update.message.reply_text(
+            "📅 *Validade do Cupom*\n\n"
+            "Este cupom terá data de expiração?\n\n"
+            "• Digite `SIM` para definir uma data\n"
+            "• Digite `NAO` para cupom sem expiração\n"
+            "• Use /cancel para cancelar",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return GETTING_COUPON_VALIDITY
+
+    except ValueError as e:
+        await update.message.reply_text(
+            f"❌ {str(e)}. Formato correto: `10%` ou `R$5`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return GETTING_COUPON_DISCOUNT
+
+@admin_only
+async def create_coupon_get_validity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recebe informação sobre validade do cupom."""
+    response = update.message.text.strip().upper()
+
+    if response == "SIM":
+        await update.message.reply_text(
+            "📅 *Definir Data de Expiração*\n\n"
+            "Digite a data de expiração no formato:\n"
+            "`DD/MM/AAAA`\n\n"
+            "Exemplo: `31/12/2025`\n\n"
+            "Ou digite `HOJE` para expirar hoje à meia-noite",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        context.user_data['coupon_needs_validity'] = True
+        return GETTING_COUPON_USAGE_LIMIT
+
+    elif response == "NAO" or response == "NÃO":
+        context.user_data['coupon_valid_until'] = None
+
+        # Pergunta sobre limite de uso
+        await update.message.reply_text(
+            "🔢 *Limite de Uso*\n\n"
+            "Quantas vezes este cupom pode ser usado?\n\n"
+            "• Digite um número (ex: `100`, `500`)\n"
+            "• Digite `ILIMITADO` para uso sem limite\n"
+            "• Use /cancel para cancelar",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return GETTING_COUPON_USAGE_LIMIT
+    else:
+        await update.message.reply_text(
+            "❌ Resposta inválida. Digite `SIM` ou `NAO`"
+        )
+        return GETTING_COUPON_VALIDITY
+
+@admin_only
+async def create_coupon_get_usage_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recebe limite de uso ou data de validade do cupom."""
+    text = update.message.text.strip().upper()
+
+    # Se está esperando data de validade
+    if context.user_data.get('coupon_needs_validity'):
+        try:
+            if text == "HOJE":
+                valid_until = datetime.now(TIMEZONE_BR).replace(hour=23, minute=59, second=59)
+            else:
+                # Parse DD/MM/AAAA
+                day, month, year = text.split('/')
+                valid_until = datetime(int(year), int(month), int(day), 23, 59, 59, tzinfo=TIMEZONE_BR)
+
+                # Valida se a data é futura
+                if valid_until < datetime.now(TIMEZONE_BR):
+                    await update.message.reply_text(
+                        "❌ A data de expiração deve ser no futuro!"
+                    )
+                    return GETTING_COUPON_USAGE_LIMIT
+
+            context.user_data['coupon_valid_until'] = valid_until
+            context.user_data.pop('coupon_needs_validity', None)
+
+            # Agora pergunta sobre limite de uso
+            await update.message.reply_text(
+                "🔢 *Limite de Uso*\n\n"
+                "Quantas vezes este cupom pode ser usado?\n\n"
+                "• Digite um número (ex: `100`, `500`)\n"
+                "• Digite `ILIMITADO` para uso sem limite",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return GETTING_COUPON_USAGE_LIMIT
+
+        except (ValueError, IndexError):
+            await update.message.reply_text(
+                "❌ Data inválida. Use o formato `DD/MM/AAAA`\nExemplo: `31/12/2025`"
+            )
+            return GETTING_COUPON_USAGE_LIMIT
+
+    # Se está esperando limite de uso
+    else:
+        if text == "ILIMITADO":
+            usage_limit = None
+        else:
+            try:
+                usage_limit = int(text)
+                if usage_limit <= 0:
+                    raise ValueError("Número deve ser positivo")
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ Valor inválido. Digite um número positivo ou `ILIMITADO`"
+                )
+                return GETTING_COUPON_USAGE_LIMIT
+
+        # Cria o cupom com todas as informações
+        code = context.user_data.get('coupon_code')
+        discount_type = context.user_data.get('coupon_discount_type')
+        discount_value = context.user_data.get('coupon_discount_value')
+        valid_until = context.user_data.get('coupon_valid_until')
+
+        coupon = await db.create_coupon(
+            code=code,
+            discount_type=discount_type,
+            discount_value=discount_value,
+            valid_from=None,
+            valid_until=valid_until,
+            usage_limit=usage_limit
+        )
 
         if coupon:
             discount_display = f"{discount_value}%" if discount_type == 'percentage' else f"R$ {discount_value:.2f}"
+            validity_display = format_date_br(valid_until) if valid_until else "Sem data de expiração"
+            usage_display = f"{usage_limit} usos" if usage_limit else "Uso ilimitado"
+
             await update.message.reply_text(
                 f"✅ *Cupom criado com sucesso!*\n\n"
                 f"🎟️ *Código:* `{code}`\n"
                 f"💰 *Desconto:* {discount_display}\n"
+                f"📅 *Validade:* {validity_display}\n"
+                f"🔢 *Limite:* {usage_display}\n"
                 f"📅 *Criado em:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
                 "Os usuários podem usar /cupom para aplicá-lo.",
                 parse_mode=ParseMode.MARKDOWN
@@ -279,14 +468,142 @@ async def create_coupon_get_discount(update: Update, context: ContextTypes.DEFAU
         else:
             await update.message.reply_text("❌ Erro ao criar cupom. Tente novamente.")
 
-    except ValueError as e:
-        await update.message.reply_text(
-            f"❌ Erro de formato. Use, por exemplo: `10%` ou `R$5`"
-        )
-        return GETTING_COUPON_DISCOUNT
+        context.user_data.clear()
+        return ConversationHandler.END
 
-    context.user_data.clear()
+# --- DESATIVAR CUPOM ---
+@admin_only
+async def deactivate_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Inicia processo de desativação de cupom."""
+    query = update.callback_query
+    await query.answer()
+
+    # Lista cupons ativos
+    coupons = await db.get_all_coupons(include_inactive=False)
+
+    if not coupons:
+        await query.edit_message_text(
+            "❌ Não há cupons ativos para desativar.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Voltar", callback_data="admin_manage_coupons")
+            ]])
+        )
+        return MANAGING_COUPONS
+
+    text = "🔴 *Desativar Cupom*\n\nCupons ativos:\n\n"
+    for coupon in coupons:
+        code = coupon.get('code')
+        discount_type = coupon.get('discount_type')
+        discount_value = coupon.get('discount_value')
+        usage_count = coupon.get('usage_count', 0)
+
+        if discount_type == 'percentage':
+            discount_text = f"{discount_value}%"
+        else:
+            discount_text = f"R$ {discount_value:.2f}"
+
+        text += f"• `{code}` - {discount_text} - {usage_count} usos\n"
+
+    text += "\nEnvie o código do cupom que deseja desativar:"
+
+    await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
+    context.user_data['coupon_action'] = 'deactivate'
+    return MANAGING_COUPONS
+
+@admin_only
+async def deactivate_coupon_execute(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Executa a desativação do cupom."""
+    code = update.message.text.strip().upper()
+
+    success = await db.deactivate_coupon(code)
+
+    if success:
+        await update.message.reply_text(
+            f"✅ Cupom `{code}` foi desativado com sucesso!\n\n"
+            f"Ele não poderá mais ser usado pelos usuários.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        await update.message.reply_text(
+            f"❌ Erro ao desativar cupom `{code}`.\n"
+            f"Verifique se o código está correto.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
     return ConversationHandler.END
+
+# --- REATIVAR CUPOM ---
+@admin_only
+async def reactivate_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Inicia processo de reativação de cupom."""
+    query = update.callback_query
+    await query.answer()
+
+    # Lista cupons inativos
+    all_coupons = await db.get_all_coupons(include_inactive=True)
+    inactive_coupons = [c for c in all_coupons if not c.get('is_active')]
+
+    if not inactive_coupons:
+        await query.edit_message_text(
+            "❌ Não há cupons inativos para reativar.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Voltar", callback_data="admin_manage_coupons")
+            ]])
+        )
+        return MANAGING_COUPONS
+
+    text = "🟢 *Reativar Cupom*\n\nCupons inativos:\n\n"
+    for coupon in inactive_coupons:
+        code = coupon.get('code')
+        discount_type = coupon.get('discount_type')
+        discount_value = coupon.get('discount_value')
+
+        if discount_type == 'percentage':
+            discount_text = f"{discount_value}%"
+        else:
+            discount_text = f"R$ {discount_value:.2f}"
+
+        text += f"• `{code}` - {discount_text}\n"
+
+    text += "\nEnvie o código do cupom que deseja reativar:"
+
+    await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
+    context.user_data['coupon_action'] = 'reactivate'
+    return MANAGING_COUPONS
+
+@admin_only
+async def reactivate_coupon_execute(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Executa a reativação do cupom."""
+    code = update.message.text.strip().upper()
+
+    success = await db.reactivate_coupon(code)
+
+    if success:
+        await update.message.reply_text(
+            f"✅ Cupom `{code}` foi reativado com sucesso!\n\n"
+            f"Ele está disponível novamente para uso.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        await update.message.reply_text(
+            f"❌ Erro ao reativar cupom `{code}`.\n"
+            f"Verifique se o código está correto.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    return ConversationHandler.END
+
+# --- HANDLER PARA MENSAGENS EM MANAGING_COUPONS ---
+@admin_only
+async def coupon_action_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    action = context.user_data.get('coupon_action')
+    if action == 'deactivate':
+        return await deactivate_coupon_execute(update, context)
+    elif action == 'reactivate':
+        return await reactivate_coupon_execute(update, context)
+    else:
+        await update.message.reply_text("Envie o código do cupom.")
+        return MANAGING_COUPONS
 
 # --- NOVA FUNCIONALIDADE: VER LOGS ---
 @admin_only
@@ -719,7 +1036,7 @@ async def run_broadcast(context: ContextTypes.DEFAULT_TYPE, message_to_send, use
             # Atualiza progresso a cada 50 mensagens
             if i % 50 == 0 and i > 0:
                 elapsed = (datetime.now() - start_time).seconds
-                estimated_total = (elapsed / i) * total_users if i > 0 else 0
+                estimated_total = (elapsed / i) * total_users
                 remaining = estimated_total - elapsed
 
                 await context.bot.edit_message_text(
@@ -729,7 +1046,7 @@ async def run_broadcast(context: ContextTypes.DEFAULT_TYPE, message_to_send, use
                     f"✅ Enviados: {sent_count}\n"
                     f"❌ Falhas: {failed_count}\n"
                     f"🚫 Bloqueados: {blocked_count}\n\n"
-                    f"⏱️ Tempo restante: ~{int(remaining // 60)} min"
+                    f"⏱️ Tempo restante: ~{remaining // 60} min"
                 )
                 await asyncio.sleep(3)  # Pausa para evitar limites
             else:
@@ -922,8 +1239,8 @@ async def run_new_group_broadcast(
     for i, user_id in enumerate(user_ids):
         try:
             # Verifica se já é membro
-            member_status = (await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)).status
-            if member_status in ['member', 'administrator', 'creator']:
+            member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+            if member.status in ['member', 'administrator', 'creator']:
                 already_member_count += 1
                 continue
 
@@ -971,8 +1288,6 @@ async def run_new_group_broadcast(
             failed_count += 1
 
     elapsed_time = (datetime.now() - start_time).seconds
-    denominator = total_users - already_member_count
-    success_rate = (sent_count / denominator * 100) if denominator > 0 else 0
 
     final_text = (
         f"✉️ *Envio de Convites Concluído!*\n\n"
@@ -983,7 +1298,7 @@ async def run_new_group_broadcast(
         f"👤 *Já eram membros:* {already_member_count}\n"
         f"❌ *Falhas:* {failed_count}\n\n"
         f"⏱️ *Tempo total:* {elapsed_time // 60}m {elapsed_time % 60}s\n"
-        f"📈 *Taxa de sucesso:* {success_rate:.1f}%"
+        f"📈 *Taxa de sucesso:* {(sent_count/(total_users-already_member_count)*100) if (total_users-already_member_count) > 0 else 0:.1f}%"
     )
 
     await context.bot.edit_message_text(
@@ -1020,11 +1335,10 @@ def get_admin_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(broadcast_start, pattern="^admin_broadcast$"),
                 CallbackQueryHandler(grant_new_group_start, pattern="^admin_grant_new_group$"),
                 CallbackQueryHandler(manage_groups_start, pattern="^admin_manage_groups$"),
-                CallbackQueryHandler(create_coupon_start, pattern="^admin_create_coupon$"),
+                CallbackQueryHandler(manage_coupons_start, pattern="^admin_manage_coupons$"),
                 CallbackQueryHandler(view_logs, pattern="^admin_view_logs$"),
                 CallbackQueryHandler(search_transactions_start, pattern="^admin_transactions$"),
                 CallbackQueryHandler(cancel, pattern="^admin_cancel$"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
             ],
             GETTING_USER_ID_FOR_CHECK: [
                 CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
@@ -1063,15 +1377,28 @@ def get_admin_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$")
             ],
             MANAGING_GROUPS: [
-                # Adicionar handlers específicos para add/remove/rename grupos aqui
                 CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
             ],
-            GETTING_COUPON_CODE: [
+            MANAGING_COUPONS: [
+                CallbackQueryHandler(create_coupon_start, pattern="^coupon_create$"),
+                CallbackQueryHandler(deactivate_coupon_start, pattern="^coupon_deactivate$"),
+                CallbackQueryHandler(reactivate_coupon_start, pattern="^coupon_reactivate$"),
+                CallbackQueryHandler(manage_coupons_start, pattern="^admin_manage_coupons$"),
                 CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, coupon_action_handler)
+            ],
+            GETTING_COUPON_CODE: [
+                CallbackQueryHandler(manage_coupons_start, pattern="^admin_manage_coupons$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_code)
             ],
             GETTING_COUPON_DISCOUNT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_discount)
+            ],
+            GETTING_COUPON_VALIDITY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_validity)
+            ],
+            GETTING_COUPON_USAGE_LIMIT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_usage_limit)
             ],
             GETTING_TRANSACTION_SEARCH: [
                 CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
@@ -1085,3 +1412,5 @@ def get_admin_conversation_handler() -> ConversationHandler:
         per_user=True,
         per_chat=True,
     )
+
+# --- FIM DO ARQUIVO ---

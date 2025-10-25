@@ -144,26 +144,48 @@ async def get_all_products() -> List[dict]:
 
 # --- FUNÇÕES DE ASSINATURAS ---
 
-async def create_pending_subscription(db_user_id: int, product_id: int, mp_payment_id: str) -> dict | None:
+async def create_pending_subscription(
+    db_user_id: int,
+    product_id: int,
+    mp_payment_id: str,
+    original_price: float = None,
+    final_price: float = None,
+    coupon_id: int = None
+) -> dict | None:
     """Cria um registro de assinatura com status 'pending_payment'."""
     if not supabase:
         return None
 
     try:
         logger.info(f"💾 [DB] Registrando assinatura pendente para user {db_user_id}, produto {product_id}...")
+
+        insert_data = {
+            "user_id": db_user_id,
+            "product_id": product_id,
+            "mp_payment_id": mp_payment_id,
+            "status": "pending_payment",
+            "created_at": datetime.now(TIMEZONE_BR).isoformat()
+        }
+
+        # Adiciona informações de preço e cupom se fornecidas
+        if original_price is not None:
+            insert_data["original_price"] = original_price
+        if final_price is not None:
+            insert_data["final_price"] = final_price
+        if coupon_id is not None:
+            insert_data["coupon_id"] = coupon_id
+
         response = await asyncio.to_thread(
             lambda: supabase.table('subscriptions')
-            .insert({
-                "user_id": db_user_id,
-                "product_id": product_id,
-                "mp_payment_id": mp_payment_id,
-                "status": "pending_payment",
-                "created_at": datetime.now(TIMEZONE_BR).isoformat()
-            })
+            .insert(insert_data)
             .execute()
         )
 
         await create_log('subscription_pending', f"Assinatura pendente criada: {mp_payment_id}")
+
+        # Se houver cupom, incrementa o contador de uso
+        if coupon_id:
+            await increment_coupon_usage(coupon_id)
 
         return response.data[0] if response.data else None
     except Exception as e:
