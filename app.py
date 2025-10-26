@@ -338,7 +338,7 @@ async def indicar_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Mensagem para o usuário com o texto para compartilhar
     share_text = (
         f"Ei! Estou usando um bot incrível e lembrei de você. "
-        f"Use meu código *{referral_code}* no comando /cupom antes de comprar para me ajudar a ganhar uma recompensa!"
+        f"Use meu código **{referral_code}** no comando /cupom antes de comprar para me ajudar a ganhar uma recompensa!"
     )
 
     message = (
