@@ -21,7 +21,7 @@ from telegram.request import HTTPXRequest
 
 import db_supabase as db
 import scheduler
-from admin_handlers import get_admin_conversation_handler
+from admin_handlers import get_admin_conversation_handler, ADMIN_IDS, states_list
 from utils import format_date_br, send_access_links
 
 # --- CONFIGURAÇÃO DE LOGGING ---
@@ -214,6 +214,23 @@ async def meuslinks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             "❌ Você não possui uma assinatura ativa no momento.\n\n"
             "Use /start para ver os planos disponíveis ou /suporte se você acredita que isso é um erro."
         )
+
+async def get_state_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Comando de debug para verificar o estado atual da ConversationHandler."""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("Comando restrito.")
+        return
+
+    state = context.user_data.get(ConversationHandler.STATE)
+
+    if state is None:
+        message = "ℹ️ Nenhuma conversa ativa no momento (Estado: None)."
+    else:
+        state_name = states_list[state] if isinstance(state, int) and state < len(states_list) else "Desconhecido"
+        message = f"ℹ️ Estado atual da conversa: *{state} ({state_name})*"
+
+    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
 
 # --- NOVO: COMANDO /CUPOM ---
@@ -678,6 +695,8 @@ bot_app.add_handler(CommandHandler("meuslinks", meuslinks_command))
 bot_app.add_handler(CommandHandler("indicar", indicar_command))
 bot_app.add_handler(CommandHandler("testanimation", test_animation_command))
 bot_app.add_handler(CommandHandler("getid", get_id_command))
+
+bot_app.add_handler(CommandHandler("getstate", get_state_command))
 
 # 4. CallbackQueryHandler geral por último
 bot_app.add_handler(CallbackQueryHandler(button_handler))
