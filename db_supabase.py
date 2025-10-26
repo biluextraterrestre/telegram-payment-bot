@@ -297,18 +297,26 @@ async def grant_or_extend_manual_subscription(db_user_id: int, product_id: int, 
 
         new_duration_days = new_product.get('duration_days')
 
-        # 2. Encontrar a assinatura ativa do usuário (se houver)
-        # CORREÇÃO: Vamos buscar qualquer assinatura ativa, sem a ordenação complexa.
-        response = await asyncio.to_thread(
-            lambda: supabase.table('subscriptions')
-            .select('*')
-            .eq('user_id', db_user_id)
-            .eq('status', 'active')
-            .limit(1)
-            .maybe_single()
-            .execute()
-        )
-        existing_active_sub = response.data if response.data else None
+        # 2. Encontrar a assinatura ativa do usuário (se houver) - FORMA SEGURA
+        existing_active_sub = None
+        try:
+            response = await asyncio.to_thread(
+                lambda: supabase.table('subscriptions')
+                .select('*')
+                .eq('user_id', db_user_id)
+                .eq('status', 'active')
+                .limit(1)
+                .maybe_single() # Retorna None se não encontrar, em vez de erro
+                .execute()
+            )
+            # Verificação segura: garante que response e response.data existam
+            if response and response.data:
+                existing_active_sub = response.data
+        except Exception as e:
+            # Se a busca falhar por algum motivo (ex: PostgrestError), logamos mas continuamos
+            logger.warning(f"[DB] Não foi possível encontrar assinatura ativa para o usuário {db_user_id} durante a concessão manual. Assumindo que não há. Erro: {e}")
+            existing_active_sub = None
+
 
         # --- LÓGICA DE DECISÃO ---
 
@@ -328,18 +336,15 @@ async def grant_or_extend_manual_subscription(db_user_id: int, product_id: int, 
             return await create_manual_subscription(db_user_id, product_id, admin_notes)
 
         # Cenário 3: Usuário tem uma assinatura mensal ativa. Estender.
-        # (O novo plano também é mensal, pois o caso vitalício foi tratado acima)
         if existing_active_sub and existing_active_sub.get('end_date'):
             base_date_str = existing_active_sub['end_date']
             base_date = datetime.fromisoformat(base_date_str).astimezone(TIMEZONE_BR)
 
-            # Garante que a base para extensão seja o futuro, não o passado
             if base_date < datetime.now(TIMEZONE_BR):
                 base_date = datetime.now(TIMEZONE_BR)
 
             new_end_date = base_date + timedelta(days=new_duration_days)
 
-            # Atualiza a assinatura existente
             update_response = await asyncio.to_thread(
                 lambda: supabase.table('subscriptions')
                 .update({'end_date': new_end_date.isoformat(), 'updated_at': datetime.now(TIMEZONE_BR).isoformat()})
@@ -352,7 +357,7 @@ async def grant_or_extend_manual_subscription(db_user_id: int, product_id: int, 
             return update_response.data
 
         # Cenário 4: Usuário não tem assinatura ativa. Criar uma nova.
-        else:
+        else: # existing_active_sub é None
             return await create_manual_subscription(db_user_id, product_id, admin_notes)
 
     except Exception as e:
