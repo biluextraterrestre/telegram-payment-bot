@@ -544,42 +544,58 @@ async def get_system_stats() -> Dict[str, Any]:
     """Retorna estatísticas completas do sistema usando funções SQL para eficiência."""
     if not supabase: return {}
     try:
-        stats = {}
+        # Define um dicionário base com todos os valores zerados
+        stats = {
+            'total_users': 0, 'total_groups': 0, 'active_coupons': 0,
+            'active_subscriptions': 0, 'pending_subscriptions': 0, 'expired_subscriptions': 0,
+            'total_revenue': 0.0, 'monthly_revenue': 0.0, 'daily_revenue': 0.0,
+            'conversion_rate': 0.0
+        }
+
         # Contagens de usuários, grupos, cupons
         users_resp = await asyncio.to_thread(lambda: supabase.table('users').select('id', count='exact').execute())
-        stats['total_users'] = users_resp.count
+        stats['total_users'] = users_resp.count or 0
+
         groups_resp = await asyncio.to_thread(lambda: supabase.table('groups').select('id', count='exact').execute())
-        stats['total_groups'] = groups_resp.count
+        stats['total_groups'] = groups_resp.count or 0
+
         coupons_resp = await asyncio.to_thread(lambda: supabase.table('coupons').select('id', count='exact').eq('is_active', True).execute())
-        stats['active_coupons'] = coupons_resp.count
+        stats['active_coupons'] = coupons_resp.count or 0
 
         # Contagens de assinaturas por status via RPC
         subs_counts = await asyncio.to_thread(lambda: supabase.rpc('count_subscriptions_by_status').execute())
         if subs_counts.data:
             for item in subs_counts.data:
-                # Ajusta os nomes para corresponder ao que o front-end espera
-                if item['status'] == 'pending_payment':
-                    stats['pending_subscriptions'] = item['count']
-                else:
-                    stats[f"{item['status']}_subscriptions"] = item['count']
-        stats.setdefault('active_subscriptions', 0)
-        stats.setdefault('pending_subscriptions', 0)
-        stats.setdefault('expired_subscriptions', 0)
+                status_key = f"{item.get('status', '').lower()}_subscriptions"
+                # Garante que a chave exista no dicionário de stats
+                if status_key in stats:
+                    stats[status_key] = item.get('count', 0)
 
         # Contagens de receita via RPC
         revenue_stats = await asyncio.to_thread(lambda: supabase.rpc('get_revenue_stats').execute())
-        if revenue_stats.data:
-            stats.update(revenue_stats.data[0])
-        stats.setdefault('total_revenue', 0)
-        stats.setdefault('monthly_revenue', 0)
-        stats.setdefault('daily_revenue', 0)
+        if revenue_stats.data and revenue_stats.data[0]:
+            revenue_data = revenue_stats.data[0]
+            # Atualiza apenas se o valor não for None, caso contrário mantém o 0.0 do padrão
+            stats['total_revenue'] = revenue_data.get('total_revenue') or 0.0
+            stats['monthly_revenue'] = revenue_data.get('monthly_revenue') or 0.0
+            stats['daily_revenue'] = revenue_data.get('daily_revenue') or 0.0
 
+        # Cálculo da taxa de conversão
         total_paying_users = stats['active_subscriptions'] + stats['expired_subscriptions']
-        stats['conversion_rate'] = (total_paying_users / stats['total_users'] * 100) if stats['total_users'] > 0 else 0
+        if stats['total_users'] > 0:
+            stats['conversion_rate'] = (total_paying_users / stats['total_users'] * 100)
+
         return stats
+
     except Exception as e:
         logger.error(f"❌ [DB] Erro ao buscar estatísticas do sistema: {e}", exc_info=True)
-        return {}
+        # Em caso de erro, retorna o dicionário zerado para não quebrar a interface
+        return {
+            'total_users': 0, 'total_groups': 0, 'active_coupons': 0,
+            'active_subscriptions': 0, 'pending_subscriptions': 0, 'expired_subscriptions': 0,
+            'total_revenue': 0.0, 'monthly_revenue': 0.0, 'daily_revenue': 0.0,
+            'conversion_rate': 0.0
+        }
 
 async def get_referral_stats() -> dict:
     """Busca estatísticas do sistema de indicação para o painel de admin."""

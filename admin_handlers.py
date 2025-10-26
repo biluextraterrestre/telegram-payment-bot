@@ -156,7 +156,7 @@ async def view_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             f"💸 *Receita (Hoje):* R$ {stats.get('daily_revenue', 0):.2f}\n\n"
             f"🏢 *Grupos Cadastrados:* {stats.get('total_groups', 0)}\n"
             f"🎟️ *Cupons Ativos:* {stats.get('active_coupons', 0)}\n\n"
-            f"📈 *Taxa de Conversão:* {stats.get('conversion_rate', 0):.1f}%\n"
+            f"📈 *Taxa de Conversão:* {stats.get('conversion_rate', 0.0):.1f}%\n"
             f"📅 *Última atualização:* {datetime.now(TIMEZONE_BR).strftime('%d/%m/%Y %H:%M')}"
         )
         keyboard = [
