@@ -17,6 +17,7 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden, RetryAfter
+from telegram.helpers import escape_markdown
 
 import db_supabase as db
 import scheduler
@@ -236,8 +237,13 @@ async def view_logs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             for log in logs:
                 timestamp = format_date_br(log.get('created_at'))
                 l_type = log.get('type', 'info').upper()
+
+                # --- CORREÇÃO APLICADA AQUI ---
                 message = log.get('message', 'N/A')
-                text += f"🕐 {timestamp}\n📌 `[{l_type}]` {message}\n\n"
+                # Escapa a mensagem para evitar erros de formatação
+                escaped_message = escape_markdown(message, version=2)
+                text += f"🕐 {timestamp}\n📌 `[{l_type}]` {escaped_message}\n\n"
+                # --- FIM DA CORREÇÃO ---
 
         # --- Teclado Interativo ---
         keyboard = [
