@@ -41,7 +41,7 @@ states_list = [
     'GETTING_COUPON_VALIDITY', 'GETTING_COUPON_USAGE_LIMIT',
     'GETTING_GROUP_FORWARD', 'CONFIRMING_GROUP_ADD', 'GETTING_GROUP_TO_REMOVE',
     'CONFIRMING_GROUP_REMOVE', 'GETTING_COUPON_TO_DEACTIVATE', 'GETTING_COUPON_TO_REACTIVATE',
-    'VIEWING_LOGS', 'GETTING_TRANSACTION_SEARCH', 'MANAGING_REFERRALS'
+    'VIEWING_LOGS', 'GETTING_TRANSACTION_SEARCH', 'MANAGING_REFERRALS', 'FILTERING_LOGS'
 ]
 (
     SELECTING_ACTION, GETTING_USER_ID_FOR_CHECK, GETTING_USER_ID_FOR_GRANT,
@@ -52,7 +52,7 @@ states_list = [
     GETTING_COUPON_VALIDITY, GETTING_COUPON_USAGE_LIMIT, GETTING_GROUP_FORWARD,
     CONFIRMING_GROUP_ADD, GETTING_GROUP_TO_REMOVE, CONFIRMING_GROUP_REMOVE,
     GETTING_COUPON_TO_DEACTIVATE, GETTING_COUPON_TO_REACTIVATE,
-    VIEWING_LOGS, GETTING_TRANSACTION_SEARCH, MANAGING_REFERRALS
+    VIEWING_LOGS, GETTING_TRANSACTION_SEARCH, MANAGING_REFERRALS, FILTERING_LOGS
 ) = range(len(states_list))
 
 
@@ -201,30 +201,119 @@ async def manage_referrals_start(update: Update, context: ContextTypes.DEFAULT_T
 
 @admin_only
 async def view_logs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Mostra os logs mais recentes do sistema."""
+    """
+    Ponto de entrada para a visualização de logs.
+    Mostra os logs com base nos filtros armazenados em context.user_data.
+    """
     query = update.callback_query
     await query.answer()
+
+    # Pega filtros da sessão ou usa padrões
+    filters = context.user_data.get('log_filters', {})
+    log_type = filters.get('type')
+    days_ago = filters.get('days')
+
     await query.edit_message_text("📝 Carregando logs...")
+
     try:
-        logs = await db.get_recent_logs(limit=20)
+        logs = await db.get_recent_logs(limit=20, log_type=log_type, days_ago=days_ago)
+
+        # Monta o cabeçalho com os filtros ativos
+        header = "📝 *Logs do Sistema*\n"
+        if log_type or days_ago is not None:
+            header += "_Filtros ativos:_\n"
+            if log_type:
+                header += f"  - Tipo: `{log_type}`\n"
+            if days_ago is not None:
+                period_map = {0: "Hoje", 1: "Últimas 24h", 7: "Últimos 7 dias"}
+                header += f"  - Período: `{period_map.get(days_ago, f'Últimos {days_ago} dias')}`\n"
+        header += "\n"
+
+        text = header
         if not logs:
-            text = "📝 *Logs do Sistema*\n\nNenhum log recente encontrado."
+            text += "Nenhum log encontrado para os filtros selecionados."
         else:
-            text = "📝 *Logs Recentes do Sistema*\n\n"
             for log in logs:
                 timestamp = format_date_br(log.get('created_at'))
-                log_type = log.get('type', 'info').upper()
+                l_type = log.get('type', 'info').upper()
                 message = log.get('message', 'N/A')
-                text += f"🕐 {timestamp}\n📌 [{log_type}] {message}\n\n"
+                text += f"🕐 {timestamp}\n📌 `[{l_type}]` {message}\n\n"
+
+        # --- Teclado Interativo ---
         keyboard = [
-            [InlineKeyboardButton("🔄 Atualizar", callback_data="admin_view_logs")],
-            [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")]
+            [
+                InlineKeyboardButton("🔄 Atualizar", callback_data="logs_view"),
+                InlineKeyboardButton("ByType", callback_data="logs_filter_type_menu"),
+                InlineKeyboardButton("ByDate", callback_data="logs_filter_date_menu")
+            ],
+            [InlineKeyboardButton("🧹 Limpar Filtros", callback_data="logs_filter_clear")],
+            [InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="admin_back_to_menu")]
         ]
+
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+
     except Exception as e:
         logger.error(f"Erro ao carregar logs: {e}", exc_info=True)
         await query.edit_message_text("❌ Erro ao carregar os logs.")
-    return VIEWING_LOGS
+
+    return FILTERING_LOGS
+
+
+async def logs_filter_type_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Mostra as opções de filtro por tipo de log."""
+    query = update.callback_query
+    await query.answer()
+
+    # Tipos comuns de log para facilitar a filtragem
+    log_types = ['admin_action', 'error', 'user_created', 'subscription_activated', 'subscription_revoked']
+
+    keyboard = []
+    for log_type in log_types:
+        keyboard.append([InlineKeyboardButton(f"'{log_type}'", callback_data=f"logs_set_type_{log_type}")])
+
+    keyboard.append([InlineKeyboardButton("⬅️ Voltar aos Logs", callback_data="logs_view")])
+    await query.edit_message_text("🔎 *Filtrar por Tipo*\n\nSelecione um tipo de log para visualizar:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return FILTERING_LOGS
+
+
+async def logs_filter_date_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Mostra as opções de filtro por data."""
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = [
+        [InlineKeyboardButton("Hoje", callback_data="logs_set_date_0")],
+        [InlineKeyboardButton("Últimas 24 horas", callback_data="logs_set_date_1")],
+        [InlineKeyboardButton("Últimos 7 dias", callback_data="logs_set_date_7")],
+        [InlineKeyboardButton("⬅️ Voltar aos Logs", callback_data="logs_view")]
+    ]
+    await query.edit_message_text("📅 *Filtrar por Período*\n\nSelecione um período para visualizar:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return FILTERING_LOGS
+
+
+async def logs_set_filter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Aplica um filtro (tipo ou data) e recarrega a visualização de logs."""
+    query = update.callback_query
+    data = query.data.split('_')
+    filter_type = data[2]
+    filter_value = "_".join(data[3:])
+
+    if 'log_filters' not in context.user_data:
+        context.user_data['log_filters'] = {}
+
+    if filter_type == 'type':
+        context.user_data['log_filters']['type'] = filter_value
+    elif filter_type == 'date':
+        context.user_data['log_filters']['days'] = int(filter_value)
+
+    # Chama a função principal para recarregar com os novos filtros
+    return await view_logs(update, context)
+
+
+async def logs_clear_filters(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Limpa todos os filtros e recarrega a visualização de logs."""
+    context.user_data.pop('log_filters', None)
+    return await view_logs(update, context)
 
 # --- SEÇÃO DE GERENCIAMENTO DE GRUPOS COM LOGS DE DEBUG ---
 
@@ -1109,7 +1198,14 @@ def get_admin_conversation_handler() -> ConversationHandler:
             CONFIRMING_REVOKE: [CallbackQueryHandler(revoke_access_confirm, pattern="^revoke_confirm$")],
             GETTING_BROADCAST_MESSAGE: [MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO | filters.Document.ALL) & ~filters.COMMAND, broadcast_receive_message)],
             CONFIRMING_BROADCAST: [CallbackQueryHandler(broadcast_confirm, pattern="^broadcast_confirm$")],
-            VIEWING_LOGS: [CallbackQueryHandler(view_logs, pattern="^admin_view_logs$")],
+            FILTERING_LOGS: [
+            CallbackQueryHandler(view_logs, pattern="^logs_view$"),
+            CallbackQueryHandler(logs_filter_type_menu, pattern="^logs_filter_type_menu$"),
+            CallbackQueryHandler(logs_filter_date_menu, pattern="^logs_filter_date_menu$"),
+            CallbackQueryHandler(logs_set_filter, pattern="^logs_set_"),
+            CallbackQueryHandler(logs_clear_filters, pattern="^logs_filter_clear$"),
+            CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
+            ],
             MANAGING_GROUPS: [
                 CallbackQueryHandler(add_group_start, pattern="^group_add$"),
                 CallbackQueryHandler(remove_group_start, pattern="^group_remove$"),

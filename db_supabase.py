@@ -616,14 +616,34 @@ async def create_log(log_type: str, message: str, user_id: Optional[int] = None)
     except Exception as e:
         logger.error(f"❌ [DB] Erro ao criar log: {e}", exc_info=True)
 
-async def get_recent_logs(limit: int = 50) -> List[dict]:
-    """Busca os logs mais recentes."""
+async def get_recent_logs(
+    limit: int = 20,
+    log_type: Optional[str] = None,
+    days_ago: Optional[int] = None
+) -> List[dict]:
+    """
+    Busca logs com filtros opcionais por tipo e período.
+    - log_type: Filtra por um tipo de log específico (ex: 'error').
+    - days_ago: Filtra logs dos últimos X dias.
+    """
     if not supabase: return []
     try:
-        response = await asyncio.to_thread(lambda: supabase.table('logs').select('*').order('created_at', desc=True).limit(limit).execute())
+        query = supabase.table('logs').select('*').order('created_at', desc=True).limit(limit)
+
+        if log_type:
+            query = query.eq('type', log_type)
+
+        if days_ago is not None:
+            # Pega a data de X dias atrás no fuso horário correto
+            start_date = datetime.now(TIMEZONE_BR) - timedelta(days=days_ago)
+            # Zera o horário para pegar desde o início do dia
+            start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            query = query.gte('created_at', start_date.isoformat())
+
+        response = await asyncio.to_thread(lambda: query.execute())
         return response.data or []
     except Exception as e:
-        logger.error(f"❌ [DB] Erro ao buscar logs: {e}", exc_info=True)
+        logger.error(f"❌ [DB] Erro ao buscar logs com filtros: {e}", exc_info=True)
         return []
 
 async def get_system_stats() -> Dict[str, Any]:
