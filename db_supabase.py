@@ -297,13 +297,13 @@ async def grant_or_extend_manual_subscription(db_user_id: int, product_id: int, 
 
         new_duration_days = new_product.get('duration_days')
 
-        # 2. Encontrar a assinatura ativa mais recente do usuário (se houver)
+        # 2. Encontrar a assinatura ativa do usuário (se houver)
+        # CORREÇÃO: Vamos buscar qualquer assinatura ativa, sem a ordenação complexa.
         response = await asyncio.to_thread(
             lambda: supabase.table('subscriptions')
             .select('*')
             .eq('user_id', db_user_id)
             .eq('status', 'active')
-            .order('end_date', desc=True, nulls_last=True) # Trata vitalícios (end_date=NULL) como os últimos
             .limit(1)
             .maybe_single()
             .execute()
@@ -315,9 +315,9 @@ async def grant_or_extend_manual_subscription(db_user_id: int, product_id: int, 
         # Cenário 1: Usuário já tem acesso vitalício. Não fazer nada.
         if existing_active_sub and not existing_active_sub.get('end_date'):
             logger.info(f"[DB] grant_or_extend: Usuário {db_user_id} já possui acesso vitalício. Nenhuma ação tomada.")
-            return {"status": "already_lifetime"} # Retorno especial para o handler
+            return {"status": "already_lifetime"}
 
-        # Cenário 2: O novo plano é vitalício. Substitui qualquer plano existente.
+        # Cenário 2: O novo plano é vitalício. Substitui qualquer plano mensal existente.
         if not new_duration_days:
             if existing_active_sub:
                 # Marca a assinatura antiga como substituída
@@ -328,6 +328,7 @@ async def grant_or_extend_manual_subscription(db_user_id: int, product_id: int, 
             return await create_manual_subscription(db_user_id, product_id, admin_notes)
 
         # Cenário 3: Usuário tem uma assinatura mensal ativa. Estender.
+        # (O novo plano também é mensal, pois o caso vitalício foi tratado acima)
         if existing_active_sub and existing_active_sub.get('end_date'):
             base_date_str = existing_active_sub['end_date']
             base_date = datetime.fromisoformat(base_date_str).astimezone(TIMEZONE_BR)
@@ -341,7 +342,7 @@ async def grant_or_extend_manual_subscription(db_user_id: int, product_id: int, 
             # Atualiza a assinatura existente
             update_response = await asyncio.to_thread(
                 lambda: supabase.table('subscriptions')
-                .update({'end_date': new_end_date.isoformat()})
+                .update({'end_date': new_end_date.isoformat(), 'updated_at': datetime.now(TIMEZONE_BR).isoformat()})
                 .eq('id', existing_active_sub['id'])
                 .select('*')
                 .single()
