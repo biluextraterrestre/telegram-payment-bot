@@ -278,6 +278,86 @@ async def create_manual_subscription(db_user_id: int, product_id: int, admin_not
         logger.error(f"❌ [DB] Erro ao criar assinatura manual: {e}", exc_info=True)
         return None
 
+async def grant_or_extend_manual_subscription(db_user_id: int, product_id: int, admin_notes: str) -> dict | None:
+    """
+    Concede acesso manual a um produto.
+    - Se o usuário já tiver uma assinatura mensal ativa, estende a data de término.
+    - Se o usuário não tiver assinatura ativa, cria uma nova.
+    - Se o novo produto for vitalício, substitui qualquer assinatura existente.
+    - Se o usuário já tiver uma assinatura vitalícia, não faz nada.
+    """
+    if not supabase: return None
+
+    try:
+        # 1. Obter detalhes do novo produto
+        new_product = await get_product_by_id(product_id)
+        if not new_product:
+            logger.error(f"[DB] grant_or_extend: Produto {product_id} não encontrado.")
+            return None
+
+        new_duration_days = new_product.get('duration_days')
+
+        # 2. Encontrar a assinatura ativa mais recente do usuário (se houver)
+        response = await asyncio.to_thread(
+            lambda: supabase.table('subscriptions')
+            .select('*')
+            .eq('user_id', db_user_id)
+            .eq('status', 'active')
+            .order('end_date', desc=True, nulls_last=True) # Trata vitalícios (end_date=NULL) como os últimos
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+        existing_active_sub = response.data if response.data else None
+
+        # --- LÓGICA DE DECISÃO ---
+
+        # Cenário 1: Usuário já tem acesso vitalício. Não fazer nada.
+        if existing_active_sub and not existing_active_sub.get('end_date'):
+            logger.info(f"[DB] grant_or_extend: Usuário {db_user_id} já possui acesso vitalício. Nenhuma ação tomada.")
+            return {"status": "already_lifetime"} # Retorno especial para o handler
+
+        # Cenário 2: O novo plano é vitalício. Substitui qualquer plano existente.
+        if not new_duration_days:
+            if existing_active_sub:
+                # Marca a assinatura antiga como substituída
+                await asyncio.to_thread(
+                    lambda: supabase.table('subscriptions').update({'status': 'superceded'}).eq('id', existing_active_sub['id']).execute()
+                )
+            # Cria a nova assinatura vitalícia
+            return await create_manual_subscription(db_user_id, product_id, admin_notes)
+
+        # Cenário 3: Usuário tem uma assinatura mensal ativa. Estender.
+        if existing_active_sub and existing_active_sub.get('end_date'):
+            base_date_str = existing_active_sub['end_date']
+            base_date = datetime.fromisoformat(base_date_str).astimezone(TIMEZONE_BR)
+
+            # Garante que a base para extensão seja o futuro, não o passado
+            if base_date < datetime.now(TIMEZONE_BR):
+                base_date = datetime.now(TIMEZONE_BR)
+
+            new_end_date = base_date + timedelta(days=new_duration_days)
+
+            # Atualiza a assinatura existente
+            update_response = await asyncio.to_thread(
+                lambda: supabase.table('subscriptions')
+                .update({'end_date': new_end_date.isoformat()})
+                .eq('id', existing_active_sub['id'])
+                .select('*')
+                .single()
+                .execute()
+            )
+            logger.info(f"[DB] grant_or_extend: Assinatura {existing_active_sub['id']} estendida para {new_end_date.isoformat()}.")
+            return update_response.data
+
+        # Cenário 4: Usuário não tem assinatura ativa. Criar uma nova.
+        else:
+            return await create_manual_subscription(db_user_id, product_id, admin_notes)
+
+    except Exception as e:
+        logger.error(f"❌ [DB] Erro em grant_or_extend_manual_subscription: {e}", exc_info=True)
+        return None
+
 async def revoke_subscription(db_user_id: int, admin_notes: str) -> bool:
     """Revoga a assinatura ativa de um usuário."""
     if not supabase: return False

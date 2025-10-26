@@ -581,29 +581,53 @@ async def grant_access_receive_id(update: Update, context: ContextTypes.DEFAULT_
 
 @admin_only
 async def grant_access_select_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Concede o plano selecionado ao usuário."""
+    """Concede ou estende o plano selecionado ao usuário."""
     query = update.callback_query
     await query.answer()
+
     product_id = int(query.data.split('_')[-1])
     db_user_id = context.user_data.get('grant_user_id')
     telegram_user_id = context.user_data.get('grant_telegram_user_id')
     admin_id = update.effective_user.id
+
+    if not db_user_id or not telegram_user_id:
+        await query.edit_message_text("❌ Erro: Dados do usuário não encontrados na sessão. Por favor, tente novamente.")
+        context.user_data.clear()
+        return await back_to_main_menu(update, context)
+
     await query.edit_message_text(text="⏳ Processando concessão...")
+
     unique_grant_id = f"manual_grant_by_admin_{admin_id}_{datetime.now().timestamp()}"
-    new_sub = await db.create_manual_subscription(db_user_id, product_id, unique_grant_id)
-    if new_sub:
-        await db.create_log('admin_action', f"Admin {admin_id} concedeu acesso manual ({product_id}) para usuário {telegram_user_id}")
-        await send_access_links(context.bot, telegram_user_id, new_sub.get('mp_payment_id', 'manual'))
-        await query.edit_message_text(text=f"✅ Acesso concedido com sucesso para o usuário {telegram_user_id}!")
-        try:
-            await context.bot.send_message(telegram_user_id, "🎉 Boas notícias! Um administrador concedeu acesso premium a você.")
-        except Exception as e:
-            logger.error(f"Erro ao notificar usuário {telegram_user_id} sobre concessão: {e}")
+
+    # Usa a nova função inteligente
+    result_sub = await db.grant_or_extend_manual_subscription(db_user_id, product_id, unique_grant_id)
+
+    if result_sub:
+        # Tratamento do caso especial: usuário já é vitalício
+        if result_sub.get("status") == "already_lifetime":
+            await query.edit_message_text(text=f"✅ Operação concluída. O usuário {telegram_user_id} já possui acesso vitalício, nenhuma ação foi necessária.")
+        else:
+            # Caso de sucesso (criação ou extensão)
+            action_log = "estendeu" if result_sub.get('start_date') != result_sub.get('updated_at') else "concedeu"
+            await db.create_log('admin_action', f"Admin {admin_id} {action_log} acesso manual ({product_id}) para usuário {telegram_user_id}")
+
+            # Envia links apenas se for uma nova concessão, não uma extensão
+            if action_log == "concedeu":
+                await send_access_links(context.bot, telegram_user_id, result_sub.get('mp_payment_id', 'manual'))
+
+            await query.edit_message_text(text=f"✅ Acesso {action_log} com sucesso para o usuário {telegram_user_id}!")
+
+            try:
+                message_to_user = "🎉 Boas notícias! Sua assinatura foi estendida por um administrador." if action_log == "estendeu" else "🎉 Boas notícias! Um administrador concedeu acesso premium a você."
+                await context.bot.send_message(telegram_user_id, message_to_user)
+            except Exception as e:
+                logger.error(f"Erro ao notificar usuário {telegram_user_id} sobre concessão/extensão: {e}")
     else:
         await query.edit_message_text(text="❌ Falha ao conceder acesso. Verifique os logs do sistema.")
+
     context.user_data.clear()
-    await show_main_admin_menu(update, context, is_edit=True)
-    return SELECTING_ACTION
+    await asyncio.sleep(3) # Aumenta o tempo para o admin ler a mensagem
+    return await back_to_main_menu(update, context)
 
 @admin_only
 async def revoke_access_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
