@@ -226,33 +226,40 @@ async def get_state_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     state = None
     conv_key_found = None
 
-    # O estado da conversa é armazenado no context.user_data sob uma chave que é uma tupla.
-    # Vamos iterar para encontrar essa chave.
     for key in context.user_data.keys():
         if isinstance(key, tuple) and key[0] == 'admin-conversation':
             conv_key_found = key
             break
 
     if conv_key_found and context.user_data.get(conv_key_found):
-        # O valor associado à chave da conversa é outra tupla: (estado, {dados})
         state_tuple = context.user_data[conv_key_found]
-        state = state_tuple[0]  # O estado é o primeiro elemento
+        state = state_tuple[0]
 
-    # Agora, formatamos a mensagem de resposta
+    # --- INÍCIO DA CORREÇÃO DE FORMATAÇÃO ---
+
+    # Função auxiliar para escapar caracteres do MarkdownV2
+    def escape_markdown(text: str) -> str:
+        escape_chars = r'_*[]()~`>#+-=|{}.!'
+        return ''.join(f'\\{char}' if char in escape_chars else char for char in str(text))
+
+    raw_data_str = escape_markdown(str(context.user_data))
+
     if state is not None:
         state_name = states_list[state] if isinstance(state, int) and state < len(states_list) else "Desconhecido"
         message = (
-            f"✅ Conversa ativa encontrada!\n"
-            f"ℹ️ Estado atual: *{state} ({state_name})*\n\n"
-            f"🔍 Raw user_data:\n`{context.user_data}`"
+            f"✅ Conversa ativa encontrada\\!\n"
+            f"ℹ️ Estado atual: *{state} ({escape_markdown(state_name)})*\n\n"
+            f"🔍 Raw user\\_data:\n`{raw_data_str}`"
         )
     else:
         message = (
-            f"ℹ️ Nenhuma conversa ativa encontrada para você.\n\n"
-            f"🔍 Raw user_data:\n`{context.user_data}`"
+            f"ℹ️ Nenhuma conversa ativa encontrada para você\\.\n\n"
+            f"🔍 Raw user\\_data:\n`{raw_data_str}`"
         )
 
-    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+    # Usar MARKDOWN_V2 que é mais consistente com o escape
+    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN_V2)
+    # --- FIM DA CORREÇÃO DE FORMATAÇÃO ---
 
 # --- NOVO: COMANDO /CUPOM ---
 async def cupom_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
