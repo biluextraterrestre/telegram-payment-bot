@@ -134,6 +134,15 @@ async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await show_main_admin_menu(update, context, is_edit=True)
     return SELECTING_ACTION
 
+@admin_only
+async def back_to_manage_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Callback para voltar ao menu de gerenciamento de cupons."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data.clear()
+    await manage_coupons_start(update, context) # Chama a função correta de cupons
+    return MANAGING_COUPONS
+
 
 # --- SEÇÃO 2: DASHBOARDS E VISUALIZAÇÃO ---
 
@@ -1056,7 +1065,7 @@ def get_admin_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(manage_coupons_start, pattern="^admin_manage_coupons$"),
                 CallbackQueryHandler(manage_groups_start, pattern="^admin_manage_groups$"),
                 CallbackQueryHandler(view_logs, pattern="^admin_view_logs$"),
-                CallbackQueryHandler(grant_new_group_start, pattern="^admin_grant_new_group$"), # Note que esta linha estava faltando no seu arquivo original
+                CallbackQueryHandler(grant_new_group_start, pattern="^admin_grant_new_group$"),
                 CallbackQueryHandler(cancel, pattern="^admin_cancel$"),
             ],
             MANAGING_REFERRALS: [
@@ -1136,25 +1145,24 @@ def get_admin_conversation_handler() -> ConversationHandler:
             ],
             GETTING_COUPON_CODE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_code),
-                CallbackQueryHandler(back_to_manage_groups, pattern="^admin_manage_coupons$"), # Voltar para o menu de cupons
+                CallbackQueryHandler(back_to_manage_coupons, pattern="^admin_manage_coupons$"),
             ],
             GETTING_COUPON_DISCOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_discount)],
             GETTING_COUPON_VALIDITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_validity)],
             GETTING_COUPON_USAGE_LIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_usage_limit)],
             GETTING_COUPON_TO_DEACTIVATE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, deactivate_coupon_execute),
-                CallbackQueryHandler(back_to_manage_groups, pattern="^admin_manage_coupons$"), # Voltar para o menu de cupons
+                CallbackQueryHandler(back_to_manage_coupons, pattern="^admin_manage_coupons$"), # CORRIGIDO
             ],
             GETTING_COUPON_TO_REACTIVATE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, reactivate_coupon_execute),
-                CallbackQueryHandler(back_to_manage_groups, pattern="^admin_manage_coupons$"), # Voltar para o menu de cupons
+                CallbackQueryHandler(back_to_manage_coupons, pattern="^admin_manage_coupons$"), # CORRIGIDO
             ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
-            # O handler global de voltar foi removido daqui para evitar conflitos.
-            # Cada estado agora gerencia seu próprio botão de "voltar".
-            CommandHandler("admin", admin_panel)
+            CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"), # Re-adicionado aqui como último recurso
+            CommandHandler("admin", admin_panel),
         ],
         per_user=True,
         per_chat=True,
