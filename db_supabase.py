@@ -205,20 +205,35 @@ async def activate_subscription(mp_payment_id: str) -> dict | None:
             "end_date": new_end_date.isoformat() if new_end_date else None
         }
 
-        # --- LINHA CORRIGIDA ---
-        # O método .select() deve vir ANTES do filtro .eq()
-        final_response = await asyncio.to_thread(
-            lambda: supabase.table('subscriptions').update(update_payload).select('*, user:users(*)').eq('id', subscription['id']).single().execute()
+        # --- CORREÇÃO APLICADA (SUGESTÃO DO CHATGPT) ---
+
+        # 1. Atualiza a assinatura sem tentar retornar os dados
+        await asyncio.to_thread(
+            lambda: supabase.table('subscriptions')
+            .update(update_payload)
+            .eq('id', subscription['id'])
+            .execute()
         )
+
+        # 2. Busca o registro atualizado em uma chamada separada
+        final_response = await asyncio.to_thread(
+            lambda: supabase.table('subscriptions')
+            .select('*, user:users(*)')
+            .eq('id', subscription['id'])
+            .single()
+            .execute()
+        )
+
         # --- FIM DA CORREÇÃO ---
 
-        if final_response.data:
+        if final_response and final_response.data:
+            updated_subscription = final_response.data
             await create_log('subscription_activated', f"Assinatura {subscription['id']} ativada para usuário {user['telegram_user_id']}")
             logger.info(f"✅ [DB] Assinatura {subscription['id']} ativada com sucesso.")
-            final_response.data[0]['product'] = product
-            return final_response.data[0]
+            updated_subscription['product'] = product # Adiciona a informação do produto de volta
+            return updated_subscription
         else:
-            logger.error(f"❌ [DB] Falha ao atualizar e retornar dados da assinatura {subscription['id']}.")
+            logger.error(f"❌ [DB] Falha ao buscar dados da assinatura {subscription['id']} após a atualização.")
             return None
 
     except Exception as e:
