@@ -524,30 +524,41 @@ async def get_coupon_by_code(code: str) -> dict | None:
             logger.error(f"[DB] Erro ao buscar cupom {code}: {e}")
         return None
 
-async def create_coupon(code: str, discount_type: str, discount_value: float) -> dict | None:
-    """Cria um novo cupom de desconto."""
+async def create_coupon(
+    code: str,
+    discount_type: str,
+    discount_value: float,
+    valid_until: Optional[datetime] = None,
+    usage_limit: Optional[int] = None
+) -> dict | None:
+    """Cria um novo cupom de desconto com validade e limite de uso."""
     if not supabase:
         return None
 
     try:
+        insert_data = {
+            "code": code.upper(),
+            "discount_type": discount_type,
+            "discount_value": discount_value,
+            "is_active": True,
+            "usage_limit": usage_limit,
+            "valid_until": valid_until.isoformat() if valid_until else None,
+            "created_at": datetime.now(TIMEZONE_BR).isoformat()
+        }
+
         response = await asyncio.to_thread(
             lambda: supabase.table('coupons')
-            .insert({
-                "code": code.upper(),
-                "discount_type": discount_type,
-                "discount_value": discount_value,
-                "is_active": True,
-                "created_at": datetime.now(TIMEZONE_BR).isoformat()
-            })
+            .insert(insert_data)
             .execute()
         )
 
-        await create_log('coupon_created', f"Cupom criado: {code} ({discount_type}: {discount_value})")
-        logger.info(f"✅ [DB] Cupom {code} criado.")
+        log_message = f"Cupom criado: {code} ({discount_type}: {discount_value})"
+        await create_log('coupon_created', log_message)
+        logger.info(f"✅ [DB] {log_message}")
         return response.data[0] if response.data else None
 
     except Exception as e:
-        logger.error(f"❌ [DB] Erro ao criar cupom: {e}", exc_info=True)
+        logger.error(f"❌ [DB] Erro ao criar cupom '{code}': {e}", exc_info=True)
         return None
 
 async def deactivate_coupon(code: str) -> bool:
@@ -569,6 +580,21 @@ async def deactivate_coupon(code: str) -> bool:
     except Exception as e:
         logger.error(f"❌ [DB] Erro ao desativar cupom: {e}", exc_info=True)
         return False
+
+async def get_all_coupons(include_inactive: bool = False) -> List[dict]:
+    """Busca todos os cupons, opcionalmente incluindo os inativos."""
+    if not supabase:
+        return []
+    try:
+        query = supabase.table('coupons').select('*').order('created_at', desc=True)
+        if not include_inactive:
+            query = query.eq('is_active', True)
+
+        response = await asyncio.to_thread(lambda: query.execute())
+        return response.data if response.data else []
+    except Exception as e:
+        logger.error(f"❌ [DB] Erro ao buscar todos os cupons: {e}", exc_info=True)
+        return []
 
 # --- FUNÇÕES DE LOGS ---
 
@@ -723,58 +749,152 @@ async def search_transactions(search_term: str) -> List[dict]:
         return []
 
     try:
+        query = supabase.table('subscriptions')
+
         # Determina o tipo de busca
         if search_term == 'hoje':
             today = datetime.now(TIMEZONE_BR).date().isoformat()
-            response = await asyncio.to_thread(
-                lambda: supabase.table('subscriptions')
-                .select('*, user:users(*), product:products(*)')
-                .gte('created_at', today)
-                .order('created_at', desc=True)
-                .execute()
-            )
+            query = query.select('*, user:users(*), product:products(*)') \
+                         .gte('created_at', today)
         elif search_term == 'semana':
             week_ago = (datetime.now(TIMEZONE_BR) - timedelta(days=7)).isoformat()
-            response = await asyncio.to_thread(
-                lambda: supabase.table('subscriptions')
-                .select('*, user:users(*), product:products(*)')
-                .gte('created_at', week_ago)
-                .order('created_at', desc=True)
-                .execute()
-            )
+            query = query.select('*, user:users(*), product:products(*)') \
+                         .gte('created_at', week_ago)
         elif search_term.isdigit():
-            # Busca por user ID
-            response = await asyncio.to_thread(
-                lambda: supabase.table('subscriptions')
-                .select('*, user:users(*), product:products(*)')
-                .eq('user.telegram_user_id', int(search_term))
-                .order('created_at', desc=True)
-                .execute()
-            )
+            # Busca por user ID - SINTAXE CORRIGIDA
+            query = query.select('*, user:users!inner(*), product:products(*)') \
+                         .eq('users.telegram_user_id', int(search_term))
         elif search_term.startswith('@'):
-            # Busca por username
+            # Busca por username - SINTAXE CORRIGIDA
             username = search_term[1:]
-            response = await asyncio.to_thread(
-                lambda: supabase.table('subscriptions')
-                .select('*, user:users(*), product:products(*)')
-                .eq('user.username', username)
-                .order('created_at', desc=True)
-                .execute()
-            )
+            query = query.select('*, user:users!inner(*), product:products(*)') \
+                         .eq('users.username', username)
         else:
             # Busca por payment ID
-            response = await asyncio.to_thread(
-                lambda: supabase.table('subscriptions')
-                .select('*, user:users(*), product:products(*)')
-                .eq('mp_payment_id', search_term)
-                .order('created_at', desc=True)
-                .execute()
-            )
+            query = query.select('*, user:users(*), product:products(*)') \
+                         .eq('mp_payment_id', search_term)
 
+        response = await asyncio.to_thread(
+            lambda: query.order('created_at', desc=True).execute()
+        )
         return response.data if response.data else []
 
     except Exception as e:
-        logger.error(f"❌ [DB] Erro ao buscar transações: {e}", exc_info=True)
+        logger.error(f"❌ [DB] Erro ao buscar transações com termo '{search_term}': {e}", exc_info=True)
         return []
+
+# --- NOVAS FUNÇÕES DE INDICAÇÃO ---
+
+async def find_user_by_referral_code(code: str) -> dict | None:
+    """Encontra o usuário dono de um código de referência."""
+    if not supabase: return None
+    try:
+        response = await asyncio.to_thread(
+            lambda: supabase.table('users')
+            .select('id, telegram_user_id')
+            .eq('referral_code', code.upper())
+            .single()
+            .execute()
+        )
+        return response.data
+    except Exception:
+        return None
+
+async def create_referral_record(referrer_id: int, referred_id: int, code: str) -> dict | None:
+    """Cria um registro na tabela de indicações."""
+    if not supabase: return None
+    try:
+        response = await asyncio.to_thread(
+            lambda: supabase.table('referrals')
+            .insert({
+                "referrer_id": referrer_id,
+                "referred_id": referred_id,
+                "referral_code": code.upper()
+            })
+            .select()
+            .execute()
+        )
+        return response.data[0] if response.data else None
+    except Exception as e:
+        logger.error(f"❌ [DB] Erro ao criar registro de indicação: {e}", exc_info=True)
+        return None
+
+async def grant_referral_reward(referral_id: int, referrer_id: int) -> bool:
+    """Concede a recompensa de 7 dias e marca a indicação como concluída."""
+    if not supabase: return False
+    try:
+        # 1. Chama a função SQL para estender a assinatura
+        await asyncio.to_thread(
+            lambda: supabase.rpc('extend_subscription_days', {'p_user_id': referrer_id, 'p_days': 7}).execute()
+        )
+
+        # 2. Atualiza o registro de indicação para não dar a recompensa duas vezes
+        await asyncio.to_thread(
+            lambda: supabase.table('referrals')
+            .update({"reward_granted": True})
+            .eq("id", referral_id)
+            .execute()
+        )
+        logger.info(f"✅ [DB] Recompensa de indicação (ID: {referral_id}) concedida ao usuário {referrer_id}.")
+        return True
+    except Exception as e:
+        logger.error(f"❌ [DB] Erro ao conceder recompensa de indicação {referral_id}: {e}", exc_info=True)
+        return False
+
+async def get_referral_stats() -> dict:
+    """Busca estatísticas do sistema de indicação para o painel de admin."""
+    if not supabase: return {}
+    try:
+        # Usamos RPC para agregar os dados diretamente no banco, que é mais eficiente
+        response = await asyncio.to_thread(
+            lambda: supabase.rpc('get_referral_dashboard_stats').execute()
+        )
+        return response.data[0] if response.data else {}
+    except Exception as e:
+        logger.error(f"❌ [DB] Erro ao buscar estatísticas de indicação: {e}", exc_info=True)
+        return {}
+
+# Adicione esta função ao db_supabase.py
+async def find_user_by_db_id(db_id: int) -> dict | None:
+    """Busca um usuário pelo seu ID do banco de dados (chave primária)."""
+    if not supabase: return None
+    try:
+        response = await asyncio.to_thread(
+            lambda: supabase.table('users').select('*').eq('id', db_id).single().execute()
+        )
+        return response.data
+    except Exception:
+        return None
+
+# Adicione esta função ao db_supabase.py
+
+async def ensure_referral_code_exists(telegram_user_id: int, code: str) -> None:
+    """
+    Garante que o código de indicação de um usuário esteja salvo no banco de dados.
+    Usa 'upsert' com 'ignore_duplicates=True', que tentará inserir e, se o código já existir
+    (violando a constraint UNIQUE), ele simplesmente não fará nada, sem gerar erro.
+    É a forma mais eficiente de garantir que o código exista.
+    """
+    if not supabase: return
+    try:
+        # Primeiro, garante que o usuário exista.
+        user_data = await asyncio.to_thread(
+            lambda: supabase.table('users').select('id').eq('telegram_user_id', telegram_user_id).single().execute()
+        )
+        if not user_data.data:
+            logger.warning(f"Tentativa de salvar código de indicação para usuário inexistente: {telegram_user_id}")
+            return
+
+        # Tenta atualizar o código de indicação.
+        await asyncio.to_thread(
+            lambda: supabase.table('users')
+            .update({'referral_code': code})
+            .eq('telegram_user_id', telegram_user_id)
+            .execute()
+        )
+    except Exception as e:
+        # Este erro pode acontecer se o código já estiver em uso por OUTRO usuário,
+        # o que é raro, mas deve ser logado.
+        logger.error(f"❌ [DB] Erro ao tentar garantir código de indicação '{code}' para usuário {telegram_user_id}: {e}", exc_info=True)
 
 # --- FIM DO ARQUIVO ---

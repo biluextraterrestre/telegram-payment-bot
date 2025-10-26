@@ -56,9 +56,6 @@ NOTIFICATION_URL = f"{WEBHOOK_BASE_URL}/webhook/mercadopago"
 TELEGRAM_WEBHOOK_URL = f"{WEBHOOK_BASE_URL}/webhook/telegram"
 TIMEZONE_BR = timezone(timedelta(hours=-3))
 
-# --- ESTADOS PARA CONVERSATION HANDLER DE CUPOM ---
-GETTING_COUPON_CODE = range(1)
-
 # --- INICIALIZAÇÃO DO BOT ---
 request_config = {'connect_timeout': 10.0, 'read_timeout': 20.0}
 httpx_request = HTTPXRequest(**request_config)
@@ -221,93 +218,88 @@ async def cupom_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 
 async def cupom_apply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Aplica o cupom e mostra o desconto."""
-    coupon_code = update.message.text.strip().upper()
+    """
+    Verifica se o código é um cupom de desconto ou um código de indicação e o processa.
+    """
+    code = update.message.text.strip().upper()
+    user = update.effective_user
 
-    # Busca o cupom no banco
-    coupon = await db.get_coupon_by_code(coupon_code)
+    # Limpa dados de sessões anteriores para evitar conflitos
+    context.user_data.pop('active_coupon', None)
+    context.user_data.pop('referral_info', None)
 
-    if not coupon:
-        await update.message.reply_text(
-            "❌ Cupom inválido ou expirado.\n\n"
-            "Verifique o código e tente novamente ou use /cancel para sair."
+    # --- LÓGICA 1: TENTAR APLICAR COMO CUPOM DE DESCONTO ---
+    coupon = await db.get_coupon_by_code(code)
+    if coupon:
+        # Validações do cupom (data de validade, limite de uso, etc.)
+        now = datetime.now(TIMEZONE_BR)
+        if coupon.get('valid_until') and now > datetime.fromisoformat(coupon['valid_until']).astimezone(TIMEZONE_BR):
+            await update.message.reply_text(f"❌ Este cupom expirou em {format_date_br(coupon['valid_until'])}.")
+            return ConversationHandler.END
+
+        if coupon.get('usage_limit') and coupon.get('usage_count', 0) >= coupon['usage_limit']:
+            await update.message.reply_text("❌ Este cupom atingiu o limite máximo de usos.")
+            return ConversationHandler.END
+
+        # Cupom válido, armazena no contexto e mostra os descontos
+        context.user_data['active_coupon'] = coupon
+
+        discount_type = coupon['discount_type']
+        discount_value = coupon['discount_value']
+        discount_text = f"{discount_value}% de desconto" if discount_type == 'percentage' else f"R$ {discount_value:.2f} de desconto"
+
+        product_monthly = await db.get_product_by_id(PRODUCT_ID_MONTHLY)
+        product_lifetime = await db.get_product_by_id(PRODUCT_ID_LIFETIME)
+
+        if discount_type == 'percentage':
+            monthly_final = product_monthly['price'] * (1 - discount_value / 100)
+            lifetime_final = product_lifetime['price'] * (1 - discount_value / 100)
+        else:
+            monthly_final = max(0, product_monthly['price'] - discount_value)
+            lifetime_final = max(0, product_lifetime['price'] - discount_value)
+
+        message = (
+            f"✅ *Cupom aplicado com sucesso!*\n\n"
+            f"🎟️ Código: `{code}`\n"
+            f"💰 Desconto: {discount_text}\n\n"
+            f"*Preços com desconto:*\n"
+            f"📅 Mensal: ~~R$ {product_monthly['price']:.2f}~~ → *R$ {monthly_final:.2f}*\n"
+            f"💎 Vitalício: ~~R$ {product_lifetime['price']:.2f}~~ → *R$ {lifetime_final:.2f}*\n\n"
+            f"Use /start para escolher seu plano e o desconto será aplicado no pagamento!"
         )
-        return GETTING_COUPON_CODE
+        await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+        await db.create_log('coupon_applied', f"Usuário {user.id} aplicou cupom {code}")
+        return ConversationHandler.END
 
-    # Verifica validade
-    now = datetime.now(TIMEZONE_BR)
+    # --- LÓGICA 2: SE NÃO FOR CUPOM, TENTAR COMO CÓDIGO DE INDICAÇÃO ---
+    referrer = await db.find_user_by_referral_code(code)
+    if referrer:
+        # Validação para impedir que o usuário use o próprio código
+        if referrer['telegram_user_id'] == user.id:
+            await update.message.reply_text("❌ Você não pode usar seu próprio código de indicação. Tente outro código ou use /cancel.")
+            return GETTING_COUPON_CODE
 
-    if coupon.get('valid_from'):
-        valid_from = datetime.fromisoformat(coupon['valid_from']).astimezone(TIMEZONE_BR)
-        if now < valid_from:
-            await update.message.reply_text(
-                f"⏰ Este cupom só será válido a partir de {format_date_br(coupon['valid_from'])}.\n\n"
-                "Tente novamente mais tarde!"
-            )
-            return ConversationHandler.END
+        # Código de indicação válido, armazena os dados para uso após o pagamento
+        context.user_data['referral_info'] = {
+            "referrer_db_id": referrer['id'],
+            "code": code
+        }
+        message = (
+            f"✅ *Código de indicação aplicado!*\n\n"
+            f"Você foi indicado(a) pelo usuário do código `{code}`.\n\n"
+            f"Quando você concluir sua primeira compra, ele(a) receberá uma recompensa. "
+            f"Use /start para ver os planos!"
+        )
+        await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+        await db.create_log('referral_code_applied', f"Usuário {user.id} aplicou código de indicação {code} do usuário {referrer['id']}")
+        return ConversationHandler.END
 
-    if coupon.get('valid_until'):
-        valid_until = datetime.fromisoformat(coupon['valid_until']).astimezone(TIMEZONE_BR)
-        if now > valid_until:
-            await update.message.reply_text(
-                f"❌ Este cupom expirou em {format_date_br(coupon['valid_until'])}.\n\n"
-                "Infelizmente não pode mais ser usado."
-            )
-            return ConversationHandler.END
-
-    # Verifica limite de uso
-    if coupon.get('usage_limit'):
-        if coupon.get('usage_count', 0) >= coupon['usage_limit']:
-            await update.message.reply_text(
-                "❌ Este cupom atingiu o limite de usos.\n\n"
-                "Infelizmente não pode mais ser usado."
-            )
-            return ConversationHandler.END
-
-    # Salva o cupom no contexto do usuário
-    context.user_data['active_coupon'] = coupon
-
-    # Calcula e mostra o desconto
-    discount_type = coupon['discount_type']
-    discount_value = coupon['discount_value']
-
-    if discount_type == 'percentage':
-        discount_text = f"{discount_value}% de desconto"
-    else:
-        discount_text = f"R$ {discount_value:.2f} de desconto"
-
-    # Busca os produtos para mostrar preços com desconto
-    product_monthly = await db.get_product_by_id(PRODUCT_ID_MONTHLY)
-    product_lifetime = await db.get_product_by_id(PRODUCT_ID_LIFETIME)
-
-    # Calcula preços com desconto
-    if discount_type == 'percentage':
-        monthly_final = product_monthly['price'] * (1 - discount_value / 100)
-        lifetime_final = product_lifetime['price'] * (1 - discount_value / 100)
-    else:
-        monthly_final = max(0, product_monthly['price'] - discount_value)
-        lifetime_final = max(0, product_lifetime['price'] - discount_value)
-
-    message = (
-        f"✅ *Cupom aplicado com sucesso!*\n\n"
-        f"🎟️ Código: `{coupon_code}`\n"
-        f"💰 Desconto: {discount_text}\n\n"
-        f"*Preços com desconto:*\n"
-        f"📅 Mensal: ~~R$ {product_monthly['price']:.2f}~~ → *R$ {monthly_final:.2f}*\n"
-        f"💎 Vitalício: ~~R$ {product_lifetime['price']:.2f}~~ → *R$ {lifetime_final:.2f}*\n\n"
-        f"Use /start para escolher seu plano!\n\n"
-        f"⚠️ O desconto será aplicado automaticamente no pagamento."
+    # --- LÓGICA 3: SE NÃO FOR NENHUM DOS DOIS ---
+    await update.message.reply_text(
+        "❌ Código inválido. Não encontramos um cupom de desconto ou código de indicação com este nome.\n\n"
+        "Verifique o código e tente novamente, ou use /cancel."
     )
-
-    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
-
-    # Registra no log
-    await db.create_log(
-        'coupon_applied',
-        f"Usuário {update.effective_user.id} aplicou cupom {coupon_code}"
-    )
-
-    return ConversationHandler.END
+    return GETTING_COUPON_CODE
 
 
 async def cupom_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -319,29 +311,31 @@ async def cupom_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 # --- NOVO: COMANDO /INDICAR (Para implementação futura de sistema de referência) ---
 async def indicar_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler do comando /indicar - Gera código de indicação pessoal."""
+    """Handler do comando /indicar - Gera e/ou mostra o código de indicação pessoal."""
     tg_user = update.effective_user
 
-    # Busca ou cria código de referência do usuário
-    user_data = await db.get_or_create_user(tg_user)
-    referral_code = user_data.get('referral_code')
+    # Gera o código de forma determinística. Ele sempre será o mesmo para o mesmo usuário.
+    referral_code = f"REF{tg_user.id}"
 
-    if not referral_code:
-        # Gera um código único
-        referral_code = f"REF{tg_user.id}"
-        await db.update_user_referral_code(tg_user.id, referral_code)
+    # Garante que o usuário e seu código de indicação existam no banco de dados.
+    # A função `ensure_referral_code_exists` tentará inserir o código.
+    # Se já existir, o banco de dados (graças à constraint UNIQUE) simplesmente ignora,
+    # garantindo que o código seja salvo apenas na primeira vez.
+    await db.ensure_referral_code_exists(tg_user.id, referral_code)
+
+    # Mensagem para o usuário com o texto para compartilhar
+    share_text = (
+        f"Ei! Estou usando um bot incrível e lembrei de você. "
+        f"Use meu código *{referral_code}* no comando /cupom antes de comprar para me ajudar a ganhar uma recompensa!"
+    )
 
     message = (
-        f"🎁 *Seu Código de Indicação*\n\n"
-        f"Compartilhe seu código com amigos:\n"
+        f"🎁 *Seu Programa de Indicação*\n\n"
+        f"Compartilhe seu código pessoal com amigos e ganhe *7 dias de acesso grátis* para cada amigo que se tornar assinante!\n\n"
+        f"Seu código é:\n"
         f"🔑 `{referral_code}`\n\n"
-        f"*Como funciona?*\n"
-        f"1️⃣ Seu amigo usa o código ao se cadastrar\n"
-        f"2️⃣ Quando ele fizer a primeira compra\n"
-        f"3️⃣ Você ganha 7 dias grátis!\n\n"
-        f"*Compartilhe:*\n"
-        f"Hey! Use o código `{referral_code}` e ganhe desconto na sua primeira compra!\n\n"
-        f"_Sistema de indicação em breve!_"
+        f"👇 *Copie a mensagem abaixo e envie para seus amigos:*\n\n"
+        f"`{share_text}`"
     )
 
     await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
@@ -463,7 +457,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         # Verifica se há cupom ativo
         active_coupon = context.user_data.get('active_coupon')
+        referral_info = context.user_data.get('referral_info') # Pega a informação da indicação
         final_price = product['price']
+        # ... (cálculo de preço com desconto)
 
         if active_coupon:
             discount_type = active_coupon['discount_type']
@@ -483,7 +479,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         else:
             await query.edit_message_text(text=f"Gerando sua cobrança PIX para o plano '{product['name']}', aguarde...")
 
-        payment_data = await create_pix_payment(tg_user, product, final_price, active_coupon)
+        payment_data = await create_pix_payment(tg_user, product, final_price, active_coupon, referral_info)
 
         if payment_data:
             qr_code_image = base64.b64decode(payment_data['qr_code_base64'])
@@ -494,6 +490,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
             # Limpa o cupom do contexto após uso
             context.user_data.pop('active_coupon', None)
+            context.user_data.pop('referral_info', None)
         else:
             await query.edit_message_text(text="Desculpe, ocorreu um erro ao gerar sua cobrança. Tente novamente mais tarde ou use /suporte.")
 
@@ -527,7 +524,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 # --- LÓGICA DE PAGAMENTO E ACESSO ---
 
-async def create_pix_payment(tg_user: TelegramUser, product: dict, final_price: float, coupon: dict = None) -> dict | None:
+async def create_pix_payment(tg_user: TelegramUser, product: dict, final_price: float, coupon: dict = None, referral_info: dict = None) -> dict | None:
     """Cria uma cobrança PIX no Mercado Pago e uma assinatura pendente no DB."""
     url = "https://api.mercadopago.com/v1/payments"
     headers = {
@@ -536,12 +533,21 @@ async def create_pix_payment(tg_user: TelegramUser, product: dict, final_price: 
         "X-Idempotency-Key": str(uuid.uuid4())
     }
 
-    external_ref = f"user:{tg_user.id};product:{product['id']}"
+    # --- MODIFICAÇÃO IMPORTANTE AQUI ---
+    db_user = await db.get_or_create_user(tg_user)
+    if not db_user:
+        logger.error(f"Não foi possível obter/criar o usuário do DB para {tg_user.id}.")
+        return None
+
+    external_ref = f"user_db_id:{db_user['id']};product_id:{product['id']}"
     if coupon:
-        external_ref += f";coupon:{coupon['id']}"
+        external_ref += f";coupon_id:{coupon['id']}"
+    if referral_info:
+        external_ref += f";referrer_db_id:{referral_info['referrer_db_id']};ref_code:{referral_info['code']}"
+    # --- FIM DA MODIFICAÇÃO ---
 
     payload = {
-        "transaction_amount": float(final_price),
+        "transaction_amount": float(round(final_price, 2)),
         "description": f"Acesso '{product['name']}' para {tg_user.first_name}",
         "payment_method_id": "pix",
         "payer": { "email": f"user_{tg_user.id}@telegram.bot" },
@@ -556,26 +562,21 @@ async def create_pix_payment(tg_user: TelegramUser, product: dict, final_price: 
         data = response.json()
         mp_payment_id = str(data.get('id'))
 
-        db_user = await db.get_or_create_user(tg_user)
-        if db_user and db_user.get('id'):
-            await db.create_pending_subscription(
-                db_user['id'],
-                product['id'],
-                mp_payment_id,
-                original_price=product['price'],
-                final_price=final_price,
-                coupon_id=coupon['id'] if coupon else None
-            )
-        else:
-            logger.error(f"Não foi possível obter/criar o usuário do DB para {tg_user.id}.")
-            return None
-
+        await db.create_pending_subscription(
+            db_user_id=db_user['id'],
+            product_id=product['id'],
+            mp_payment_id=mp_payment_id,
+            original_price=product['price'],
+            final_price=final_price,
+            coupon_id=coupon['id'] if coupon else None,
+            external_reference=external_ref # Salva a referência no DB
+        )
         return {
             'qr_code_base64': data['point_of_interaction']['transaction_data']['qr_code_base64'],
             'pix_copy_paste': data['point_of_interaction']['transaction_data']['qr_code']
         }
     except httpx.HTTPError as e:
-        logger.error(f"Erro HTTP ao criar pagamento no Mercado Pago: {e}")
+        logger.error(f"Erro HTTP ao criar pagamento no Mercado Pago: {e} - Resposta: {e.response.text}")
         return None
     except Exception as e:
         logger.error(f"Erro inesperado ao criar pagamento ou transação: {e}", exc_info=True)
@@ -583,22 +584,57 @@ async def create_pix_payment(tg_user: TelegramUser, product: dict, final_price: 
 
 
 async def process_approved_payment(payment_id: str):
-    """Processa um pagamento aprovado, ativa a assinatura e agenda o envio dos links."""
+    """Processa pagamento, ativa assinatura e CONCEDE RECOMPENSA DE INDICAÇÃO."""
     logger.info(f"[{payment_id}] Iniciando processamento de pagamento aprovado.")
 
     activated_subscription = await db.activate_subscription(payment_id)
 
-    if activated_subscription:
-        telegram_user_id = activated_subscription.get('user', {}).get('telegram_user_id')
-
-        if telegram_user_id:
-            logger.info(f"[{payment_id}] Assinatura ativada. Agendando envio de links para o usuário {telegram_user_id}.")
-            asyncio.create_task(send_access_links(bot_app.bot, telegram_user_id, payment_id))
-        else:
-            logger.error(f"[{payment_id}] CRÍTICO: Assinatura ativada, mas não foi possível encontrar o telegram_user_id associado.")
-    else:
+    if not activated_subscription:
         logger.warning(f"[{payment_id}] A ativação da assinatura falhou ou já estava ativa.")
+        return
 
+    # Envia links de acesso para o usuário que pagou
+    telegram_user_id = activated_subscription.get('user', {}).get('telegram_user_id')
+    if telegram_user_id:
+        logger.info(f"[{payment_id}] Assinatura ativada. Agendando envio de links para o usuário {telegram_user_id}.")
+        asyncio.create_task(send_access_links(bot_app.bot, telegram_user_id, payment_id))
+    else:
+        logger.error(f"[{payment_id}] CRÍTICO: Assinatura ativada, mas não foi possível encontrar o telegram_user_id associado.")
+
+    # --- NOVA LÓGICA DE RECOMPENSA DE INDICAÇÃO ---
+    external_ref = activated_subscription.get('external_reference', '')
+    if 'referrer_db_id' in external_ref:
+        try:
+            # Extrai os dados da referência da string
+            parts = {p.split(':')[0]: p.split(':')[1] for p in external_ref.split(';')}
+            referrer_db_id = int(parts['referrer_db_id'])
+            ref_code = parts['ref_code']
+            referred_user_db_id = int(parts['user_db_id'])
+
+            # 1. Cria o registro da indicação bem-sucedida
+            referral_record = await db.create_referral_record(referrer_db_id, referred_user_db_id, ref_code)
+            if not referral_record:
+                logger.error(f"[{payment_id}] Falha ao criar registro de indicação para referrer {referrer_db_id}.")
+                return
+
+            # 2. Concede a recompensa (7 dias) e marca como concedida
+            success = await db.grant_referral_reward(referral_record['id'], referrer_db_id)
+            if not success:
+                logger.error(f"[{payment_id}] Falha ao conceder recompensa para referrer {referrer_db_id}.")
+                return
+
+            # 3. Notifica o usuário que indicou
+            referrer_user_data = await db.find_user_by_db_id(referrer_db_id)
+            if referrer_user_data and referrer_user_data.get('telegram_user_id'):
+                referrer_tg_id = referrer_user_data['telegram_user_id']
+                await bot_app.bot.send_message(
+                    chat_id=referrer_tg_id,
+                    text="🎉 Ótimas notícias! Alguém usou seu código de indicação e você acaba de ganhar *7 dias de acesso grátis*!\n\nSua assinatura foi estendida.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                logger.info(f"[{payment_id}] Notificação de recompensa enviada com sucesso para o usuário {referrer_tg_id}.")
+        except Exception as e:
+            logger.error(f"[{payment_id}] Falha CRÍTICA ao processar recompensa de indicação: {e}", exc_info=True)
 
 # --- WEBHOOKS E CICLO DE VIDA ---
 
