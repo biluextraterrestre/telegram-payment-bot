@@ -15,6 +15,23 @@ logger = logging.getLogger(__name__)
 # --- Carrega o fuso horário uma vez ---
 TIMEZONE_BR = timezone(timedelta(hours=-3))
 
+async def alert_admins(bot: Bot, message: str):
+    """Envia uma mensagem de alerta para todos os administradores definidos."""
+    if not ADMIN_IDS:
+        logger.warning("Nenhum ADMIN_USER_IDS definido. Não é possível enviar alertas.")
+        return
+
+    full_message = f"🚨 *ALERTA DO SISTEMA* 🚨\n\n{message}"
+
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(chat_id=admin_id, text=full_message, parse_mode=ParseMode.MARKDOWN)
+            await asyncio.sleep(0.1) # Pequeno delay para evitar rate limit
+        except (Forbidden, BadRequest) as e:
+            logger.error(f"Falha ao enviar alerta para o admin {admin_id}: {e}")
+        except Exception as e:
+            logger.error(f"Erro inesperado ao enviar alerta para o admin {admin_id}: {e}", exc_info=True)
+
 def format_date_br(dt: datetime | str | None) -> str:
     """Formata data para o padrão brasileiro."""
     if not dt:

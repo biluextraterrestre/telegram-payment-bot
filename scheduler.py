@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from telegram import Bot
-from telegram.error import BadRequest, Forbidden
+from telegram.error import BadRequest, Forbidden, RetryAfter
 
 # --- CONFIGURAÇÃO ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', stream=sys.stdout)
@@ -82,6 +82,20 @@ async def find_and_process_expiring_subscriptions(supabase: Client, bot: Bot):
                 try:
                     await bot.send_message(chat_id=user_id, text=message)
                     logger.info(f"Aviso de vencimento enviado para o usuário {user_id}.")
+
+                    await asyncio.sleep(0.1) # Adiciona um pequeno delay proativo
+
+                # --- LÓGICA DE RETRY ADICIONADA AQUI ---
+                except RetryAfter as e:
+                    logger.warning(f"Rate limit atingido ao enviar aviso para {user_id}. Aguardando {e.retry_after} segundos.")
+                    await asyncio.sleep(e.retry_after)
+                    try:
+                        await bot.send_message(chat_id=user_id, text=message)
+                        logger.info(f"Aviso de vencimento enviado para o usuário {user_id} após retry.")
+                    except Exception as e_inner:
+                        logger.error(f"Falha ao reenviar aviso para {user_id} após retry: {e_inner}")
+                # --- FIM DA LÓGICA DE RETRY ---
+
                 except (Forbidden, BadRequest):
                     logger.warning(f"Não foi possível enviar aviso para o usuário {user_id} (bloqueou o bot?).")
     except Exception as e:

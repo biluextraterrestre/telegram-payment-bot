@@ -22,7 +22,7 @@ from telegram.request import HTTPXRequest
 import db_supabase as db
 import scheduler
 from admin_handlers import get_admin_conversation_handler, ADMIN_IDS, states_list
-from utils import format_date_br, send_access_links
+from utils import format_date_br, send_access_links, alert_admins
 
 # --- CONFIGURAÇÃO DE LOGGING ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', stream=sys.stdout)
@@ -634,9 +634,25 @@ async def create_pix_payment(tg_user: TelegramUser, product: dict, final_price: 
         }
     except httpx.HTTPError as e:
         logger.error(f"Erro HTTP ao criar pagamento no Mercado Pago: {e} - Resposta: {e.response.text}")
+
+        error_message = (
+            f"Falha CRÍTICA ao criar pagamento no Mercado Pago para o usuário {tg_user.id} (@{tg_user.username}).\n\n"
+            f"**Erro:** `{e}`\n"
+            f"**Resposta da API:** ```{e.response.text[:500]}```"
+        )
+        await alert_admins(bot_app.bot, error_message)
+
         return None
     except Exception as e:
         logger.error(f"Erro inesperado ao criar pagamento ou transação: {e}", exc_info=True)
+
+        error_message = (
+            f"Erro INESPERADO ao criar pagamento para o usuário {tg_user.id} (@{tg_user.username}).\n\n"
+            f"**Tipo de Erro:** `{type(e).__name__}`\n"
+            f"**Mensagem:** `{str(e)[:500]}`"
+        )
+        await alert_admins(bot_app.bot, error_message)
+
         return None
 
 
