@@ -209,9 +209,8 @@ async def activate_subscription(mp_payment_id: str) -> dict | None:
         }
 
         final_response = await asyncio.to_thread(
-            lambda: supabase.table('subscriptions').update(update_payload).eq('id', subscription['id']).select('*, user:users(*)').single().execute()
+            lambda: supabase.table('subscriptions').update(update_payload).select('*, user:users(*)').eq('id', subscription['id']).single().execute()
         )
-
         if final_response.data:
             await create_log('subscription_activated', f"Assinatura {subscription['id']} ativada para usuário {user['telegram_user_id']}")
             logger.info(f"✅ [DB] Assinatura {subscription['id']} ativada com sucesso.")
