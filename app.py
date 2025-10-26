@@ -78,8 +78,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     welcome_caption = (
-        f"Olá, {tg_user.first_name}!\n\n"
-        f"Bem-vindo(a) ao bot de acesso aos nossos *grupos exclusivos*.\n\n"
+        f"Olá, {tg_user.first_name}!\n\n" \
+        f"*Bem-vindo ao nosso Bot VIP de Conteúdo Adulto (+18!)* 🔥\n\n" \
+        f"Aqui, você acessa o *melhor* do entretenimento erótico premium, com canais exclusivos cheios de vídeos quentes e conteúdos que vão te deixar sem fôlego. Tudo administrado de forma *segura* e *discreta* pelo nosso bot – basta pagar uma taxa acessível e entrar no *paraíso do prazer ilimitado*!\n\n"
     )
 
     logger.info(f"Função /start: Tentando enviar animação com file_id: '{WELCOME_ANIMATION_FILE_ID}'")
@@ -95,8 +96,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(welcome_caption, parse_mode=ParseMode.MARKDOWN)
 
     follow_up_message = (
-        f"Por uma assinatura *única* e *barata*, ou assinatura mensal você ganha acesso imediato. Pagamento fácil via PIX.\n\n"
-        f"*Escolha seu plano de acesso:*"
+        f"*Descubra um mundo de prazer nos nossos canais VIP:*\n\n" \
+        f"- *ANAL PROFISSIONAL*: Vídeos *intensos* de sexo anal profissional, com cenas *explosivas* que vão despertar seus desejos mais profundos!\n\n" \
+        f"- *VIP BRASIL*: As brasileiras mais *quentes* e *famosas* da internet, mostrando talento e sensualidade em conteúdos *exclusivos*!\n\n" \
+        f"- *AMADORES*: Paixão crua e autêntica com casais e solos amadores, trazendo o calor de momentos *reais* e sem filtros!\n\n" \
+        f"- *VAZADOS*: Conteúdos *secretos* e *exclusivos*, com vazamentos que vão te surpreender e deixar com vontade de mais!\n\n" \
+        f"- *TRANS*: Beleza e sensualidade sem limites, com performances *arrojadas* que celebram a diversidade e o prazer!\n\n" \
+        f"- *COROAS (MILF)*: Mulheres maduras, *sedutoras* e experientes, entregando conteúdos que mostram que a idade só aumenta o fogo!\n\n" \
+        f"- *CORNOS (CUCKOLD)*: Fantasias *provocantes* de cuckold, com cenas de submissão e dominação que exploram o lado mais *ousado* do desejo!\n\n" \
+        f"- *TUFOS*: Histórias em quadrinhos *eróticas* da família Sacana, com tramas *picantes* e personagens que vão te deixar vidrado!\n\n" \
+        f"- *HENTAI*: Animes adultos *explícitos* trazendo fantasias sem censura para realizar todos os seus fetiches!\n\n" \
+        f"- *CAROLINE ZALOG*: Vídeos exclusivos da musa fitness *irresistível* que vão te deixar sem fôlego!\n\n" \
+        f"Com uma assinatura mensal ou pagamento único, você desbloqueia *acesso total* a todos esses canais, com atualizações diárias. Pagamento seguro via PIX e *privacidade absoluta* garantida.\n\n" \
+        f"*Escolha seu plano e mergulhe no prazer hoje mesmo!*"
     )
 
     keyboard = [
@@ -637,6 +649,9 @@ async def process_approved_payment(payment_id: str):
             logger.error(f"[{payment_id}] Falha CRÍTICA ao processar recompensa de indicação: {e}", exc_info=True)
 
 # --- WEBHOOKS E CICLO DE VIDA ---
+
+# --- ESTADO PARA CONVERSATION HANDLER DE CUPOM DE USUÁRIO ---
+GETTING_COUPON_CODE = 0
 
 # 1. ConversationHandler do Cupom
 cupom_handler = ConversationHandler(
