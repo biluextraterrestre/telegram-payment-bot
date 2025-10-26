@@ -739,13 +739,21 @@ async def create_coupon_get_validity(update: Update, context: ContextTypes.DEFAU
 async def create_coupon_get_usage_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Recebe a data de validade (se aplicável) ou o limite de uso para finalizar a criação."""
     text_input = update.message.text.strip().upper()
+
     if context.user_data.get('coupon_needs_validity'):
         try:
-            valid_until = datetime.strptime(text_input, '%d/%m/%Y')
-            valid_until = TIMEZONE_BR.localize(valid_until).replace(hour=23, minute=59, second=59)
+            # Converte a string de data para um objeto datetime "ingênuo" (sem fuso horário)
+            valid_until_naive = datetime.strptime(text_input, '%d/%m/%Y')
+
+            # --- CORREÇÃO APLICADA AQUI ---
+            # Associa o fuso horário ao objeto datetime e define o horário para o final do dia
+            valid_until = valid_until_naive.replace(hour=23, minute=59, second=59, tzinfo=TIMEZONE_BR)
+            # --- FIM DA CORREÇÃO ---
+
             if valid_until < datetime.now(TIMEZONE_BR):
                 await update.message.reply_text("❌ A data de expiração deve ser no futuro. Tente novamente.")
                 return GETTING_COUPON_USAGE_LIMIT
+
             context.user_data['coupon_valid_until'] = valid_until
             context.user_data.pop('coupon_needs_validity')
             await update.message.reply_text(f"✅ Data definida para {text_input}.\n\n**Passo 4/4:** Qual o limite de usos?\n\nDigite um número ou `ILIMITADO`.", parse_mode=ParseMode.MARKDOWN)
@@ -762,6 +770,7 @@ async def create_coupon_get_usage_limit(update: Update, context: ContextTypes.DE
             except ValueError:
                 await update.message.reply_text("❌ Valor inválido. Digite um número positivo ou `ILIMITADO`.")
                 return GETTING_COUPON_USAGE_LIMIT
+
         coupon_data = {
             "code": context.user_data.get('coupon_code'),
             "discount_type": context.user_data.get('coupon_discount_type'),
@@ -769,11 +778,17 @@ async def create_coupon_get_usage_limit(update: Update, context: ContextTypes.DE
             "valid_until": context.user_data.get('coupon_valid_until'),
             "usage_limit": usage_limit
         }
+
+        # Adiciona o campo valid_from que estava faltando na chamada
+        coupon_data['valid_from'] = None
+
         coupon = await db.create_coupon(**coupon_data)
+
         if coupon:
             await update.message.reply_text("✅ *Cupom criado com sucesso!*", parse_mode=ParseMode.MARKDOWN)
         else:
             await update.message.reply_text("❌ Erro ao criar cupom no banco de dados.")
+
         context.user_data.clear()
         await show_main_admin_menu(update, context)
         return SELECTING_ACTION
