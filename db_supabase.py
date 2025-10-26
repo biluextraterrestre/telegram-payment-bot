@@ -158,31 +158,48 @@ async def activate_subscription(mp_payment_id: str) -> dict | None:
     """
     Ativa uma assinatura, definindo as datas de início e fim, e retorna todos os dados necessários.
     Se o usuário já tiver uma assinatura ativa, estende a data de término.
+    É tolerante a webhooks duplicados.
     """
     if not supabase: return None
     try:
-        # 1. Busca a assinatura PENDENTE e seus dados relacionados
-        pending_sub_response = await asyncio.to_thread(
-            lambda: supabase.table('subscriptions').select('*, user:users(*), product:products(*)').eq('mp_payment_id', mp_payment_id).single().execute()
+        # 1. Busca a assinatura pelo ID de pagamento, independentemente do status inicial
+        #    Usamos maybe_single() para não dar erro se o pagamento já foi processado.
+        sub_response = await asyncio.to_thread(
+            lambda: supabase.table('subscriptions')
+            .select('*, user:users(*), product:products(*)')
+            .eq('mp_payment_id', mp_payment_id)
+            .maybe_single() # <- MUDANÇA CRÍTICA AQUI
+            .execute()
         )
-        if not pending_sub_response.data:
-            logger.warning(f"⚠️ [DB] Assinatura com mp_payment_id {mp_payment_id} não encontrada para ativação.")
+
+        if not sub_response.data:
+            logger.warning(f"⚠️ [DB] Assinatura com mp_payment_id {mp_payment_id} não encontrada no DB. Pode ser um pagamento não iniciado pelo bot.")
             return None
 
-        subscription = pending_sub_response.data
+        subscription = sub_response.data
+
+        # Se a assinatura já estiver 'active', apenas retornamos seus dados.
+        # Isso resolve o problema de webhooks duplicados.
         if subscription.get('status') == 'active':
-            logger.warning(f"⚠️ [DB] Assinatura {subscription['id']} já está ativa.")
-            return subscription # Retorna os dados para re-envio de links se necessário
+            logger.warning(f"✅ [DB] Assinatura {subscription['id']} já estava ativa. Ignorando re-ativação.")
+            return subscription
 
         user, product = subscription.get('user'), subscription.get('product')
         if not user or not product:
             logger.error(f"❌ [DB] Dados de usuário ou produto ausentes para a assinatura {subscription['id']}.")
             return None
 
-        # 2. Lógica de extensão de assinatura (se houver uma ativa)
+        # 2. Lógica de extensão de assinatura
         start_date_base = datetime.now(TIMEZONE_BR)
         active_sub_response = await asyncio.to_thread(
-            lambda: supabase.table('subscriptions').select('id, end_date').eq('user_id', user['id']).eq('status', 'active').order('end_date', desc=True).limit(1).maybe_single().execute()
+            lambda: supabase.table('subscriptions')
+            .select('id, end_date')
+            .eq('user_id', user['id'])
+            .eq('status', 'active')
+            .order('end_date', desc=True)
+            .limit(1)
+            .maybe_single()
+            .execute()
         )
         existing_active_sub = active_sub_response.data
         if existing_active_sub and existing_active_sub.get('end_date'):
@@ -195,18 +212,25 @@ async def activate_subscription(mp_payment_id: str) -> dict | None:
         duration_days = product.get('duration_days')
         new_end_date = start_date_base + timedelta(days=duration_days) if duration_days else None
         update_payload = {
-            "status": "active", "start_date": datetime.now(TIMEZONE_BR).isoformat(),
+            "status": "active",
+            "start_date": datetime.now(TIMEZONE_BR).isoformat(),
             "end_date": new_end_date.isoformat() if new_end_date else None
         }
 
-        # ATUALIZA e RETORNA os dados completos em uma única chamada
         final_response = await asyncio.to_thread(
-            lambda: supabase.table('subscriptions').update(update_payload).eq('id', subscription['id']).select('*, user:users(*)').single().execute()
+            lambda: supabase.table('subscriptions')
+            .update(update_payload)
+            .eq('id', subscription['id'])
+            .select('*, user:users(*)') # Retorna os dados completos após a atualização
+            .single() # Aqui podemos usar single() porque sabemos que o ID da assinatura existe
+            .execute()
         )
 
         if final_response.data:
             await create_log('subscription_activated', f"Assinatura {subscription['id']} ativada para usuário {user['telegram_user_id']}")
             logger.info(f"✅ [DB] Assinatura {subscription['id']} ativada com sucesso.")
+            # Mescla os dados do produto que já tínhamos para retornar tudo completo
+            final_response.data['product'] = product
             return final_response.data
         else:
             logger.error(f"❌ [DB] Falha ao atualizar e retornar dados da assinatura {subscription['id']}.")
