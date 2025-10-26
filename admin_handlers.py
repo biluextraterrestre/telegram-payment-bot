@@ -1086,6 +1086,8 @@ def get_admin_conversation_handler() -> ConversationHandler:
             MANAGING_GROUPS: [
                 CallbackQueryHandler(add_group_start, pattern="^group_add$"),
                 CallbackQueryHandler(remove_group_start, pattern="^group_remove$"),
+                # --- LINHA CRÍTICA ADICIONADA AQUI ---
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
             ],
             GETTING_GROUP_FORWARD: [
                 MessageHandler(filters.FORWARDED & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP | filters.ChatType.CHANNEL), add_group_receive_forward),
@@ -1109,27 +1111,28 @@ def get_admin_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(create_coupon_start, pattern="^coupon_create$"),
                 CallbackQueryHandler(deactivate_coupon_start, pattern="^coupon_deactivate$"),
                 CallbackQueryHandler(reactivate_coupon_start, pattern="^coupon_reactivate$"),
+                # Adicionando o botão de voltar aqui também por segurança
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
             ],
             GETTING_COUPON_CODE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_code),
-                CallbackQueryHandler(back_to_manage_coupons, pattern="^back_to_manage_coupons$"),
+                CallbackQueryHandler(back_to_manage_coupons, pattern="^admin_manage_coupons$"),
             ],
             GETTING_COUPON_DISCOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_discount)],
             GETTING_COUPON_VALIDITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_validity)],
             GETTING_COUPON_USAGE_LIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_usage_limit)],
             GETTING_COUPON_TO_DEACTIVATE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, deactivate_coupon_execute),
-                CallbackQueryHandler(back_to_manage_coupons, pattern="^back_to_manage_coupons$"),
+                CallbackQueryHandler(back_to_manage_coupons, pattern="^admin_manage_coupons$"),
             ],
             GETTING_COUPON_TO_REACTIVATE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, reactivate_coupon_execute),
-                CallbackQueryHandler(back_to_manage_coupons, pattern="^back_to_manage_coupons$"),
+                CallbackQueryHandler(back_to_manage_coupons, pattern="^admin_manage_coupons$"),
             ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
             CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-            # Adicionar handlers de voltar aqui é seguro SE eles retornarem o estado correto
             CallbackQueryHandler(back_to_manage_groups, pattern="^admin_manage_groups_back$"),
             CallbackQueryHandler(back_to_manage_coupons, pattern="^admin_manage_coupons$"),
             CommandHandler("admin", admin_panel),
