@@ -7,6 +7,7 @@ senha supabase telegram-payment-bot.txt
 GRUPOS_CANAIS.txt
 backup/
 admin_handlers - Copia.py
+Esquema das tabelas.json
 
 # Cache do Python
 __pycache__/

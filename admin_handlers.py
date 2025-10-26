@@ -121,7 +121,7 @@ async def show_main_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.error(f"Erro ao editar menu principal: {e}")
 
 @admin_only
-async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def get_admin_conversation_handler_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Ponto de entrada para o comando /admin."""
     await show_main_admin_menu(update, context)
     return SELECTING_ACTION
@@ -240,35 +240,58 @@ async def view_logs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def manage_groups_start(update: Update, context: ContextTypes.DEFAULT_TYPE, is_edit: bool = False) -> int:
     """Apresenta a lista de grupos cadastrados e as opções de gerenciamento."""
     query = update.callback_query
+
+    # --- DEBUG LOGS ---
+    logger.info("-> [DEBUG] Entrando em manage_groups_start...")
+    admin_user_id = update.effective_user.id
     if query:
         await query.answer()
+        logger.info(f"-> [DEBUG] Botão 'admin_manage_groups' clicado pelo admin {admin_user_id}.")
+    # --- FIM DEBUG LOGS ---
 
-    groups = await db.get_all_groups_with_names()
-    text = f"🏢 *Gerenciamento de Grupos*\n\n📊 Total de grupos: {len(groups)}\n\n"
-    if groups:
-        text += "Grupos cadastrados:\n"
-        for i, group in enumerate(groups[:15], 1):
-            text += f"{i}. {group.get('name', 'Sem nome')} (`{group['telegram_chat_id']}`)\n"
-    else:
-        text += "Nenhum grupo cadastrado no momento.\n"
+    try:
+        # --- DEBUG LOGS ---
+        logger.info("-> [DEBUG] Buscando grupos no banco de dados...")
+        groups = await db.get_all_groups_with_names()
+        logger.info(f"-> [DEBUG] Encontrados {len(groups)} grupos.")
+        # --- FIM DEBUG LOGS ---
 
-    keyboard = [
-        [InlineKeyboardButton("➕ Adicionar Grupo", callback_data="group_add")],
-        [InlineKeyboardButton("🗑️ Remover Grupo", callback_data="group_remove")],
-        [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+        text = f"🏢 *Gerenciamento de Grupos*\n\n📊 Total de grupos: {len(groups)}\n\n"
+        if groups:
+            text += "Grupos cadastrados:\n"
+            for i, group in enumerate(groups[:15], 1):
+                text += f"{i}. {group.get('name', 'Sem nome')} (`{group['telegram_chat_id']}`)\n"
+        else:
+            text += "Nenhum grupo cadastrado no momento.\n"
 
-    if is_edit and query:
-        try:
+        keyboard = [
+            [InlineKeyboardButton("➕ Adicionar Grupo", callback_data="group_add")],
+            [InlineKeyboardButton("🗑️ Remover Grupo", callback_data="group_remove")],
+            [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        # --- DEBUG LOGS ---
+        logger.info("-> [DEBUG] Preparando para editar a mensagem do menu de grupos...")
+        if is_edit and query:
             await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-        except BadRequest as e:
-            if "message is not modified" not in str(e):
-                logger.error(f"Erro ao editar o menu de grupos: {e}")
-    elif update.message:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        elif update.message:
+            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
-    return MANAGING_GROUPS
+        logger.info(f"-> [DEBUG] Mensagem editada. Retornando estado MANAGING_GROUPS ({MANAGING_GROUPS}).")
+        # --- FIM DEBUG LOGS ---
+
+        return MANAGING_GROUPS
+
+    except Exception as e:
+        # --- CAPTURA DE ERRO ---
+        logger.error(f"❌ ERRO CRÍTICO em manage_groups_start: {e}", exc_info=True)
+        error_text = f"❌ Ocorreu um erro inesperado ao tentar gerenciar os grupos. A equipe de desenvolvimento foi notificada."
+        if query:
+            await query.edit_message_text(error_text)
+        elif update.message:
+            await update.message.reply_text(error_text)
+        return ConversationHandler.END # Termina a conversa para evitar travamento
 
 # --- FLUXO: ADICIONAR GRUPO ---
 
@@ -1053,6 +1076,9 @@ def get_admin_conversation_handler() -> ConversationHandler:
     """Retorna o ConversationHandler completo com todos os fluxos administrativos."""
     return ConversationHandler(
         entry_points=[CommandHandler("admin", admin_panel)],
+
+        name="admin-conversation",
+
         states={
             # --- NÍVEL 1: MENU PRINCIPAL ---
             SELECTING_ACTION: [

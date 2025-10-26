@@ -215,6 +215,7 @@ async def meuslinks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             "Use /start para ver os planos disponíveis ou /suporte se você acredita que isso é um erro."
         )
 
+
 async def get_state_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Comando de debug para verificar o estado atual da ConversationHandler."""
     user_id = update.effective_user.id
@@ -222,16 +223,41 @@ async def get_state_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("Comando restrito.")
         return
 
-    state = context.user_data.get(ConversationHandler.STATE)
+    # A ConversationHandler principal é a primeira a ser registrada
+    # O nome da conversa é a chave no dicionário de dados do usuário/chat
+    # Vamos inspecionar os dados para encontrar a chave da conversa
 
-    if state is None:
-        message = "ℹ️ Nenhuma conversa ativa no momento (Estado: None)."
-    else:
+    # A biblioteca armazena o estado em um dicionário de conversas.
+    # A chave é o nome da conversa, e o valor é uma tupla: (estado, dados_persistentes)
+    # Vamos extrair isso de forma segura.
+
+    current_conversations = context.application.persistence.get_conversations("ConversationHandler")
+
+    # context.user_data é um atalho, mas vamos inspecionar a fonte para garantir
+    user_data = await context.application.persistence.get_user_data()
+    user_conv_key = None
+    if user_data.get(user_id):
+        # A chave da conversa geralmente é uma tupla com o nome do handler
+        for key in user_data[user_id].keys():
+            if isinstance(key, tuple) and key[0] == 'admin-conversation': # Usaremos um nome explícito
+                 user_conv_key = key
+                 break
+
+
+    if user_conv_key and user_data[user_id].get(user_conv_key):
+        state = user_data[user_id][user_conv_key][0] # O estado é o primeiro elemento da tupla
         state_name = states_list[state] if isinstance(state, int) and state < len(states_list) else "Desconhecido"
-        message = f"ℹ️ Estado atual da conversa: *{state} ({state_name})*"
+        message = (
+            f"ℹ️ Estado atual da conversa: *{state} ({state_name})*\n\n"
+            f"Raw user_data:\n`{user_data.get(user_id)}`"
+        )
+    else:
+        message = (
+            f"ℹ️ Nenhuma conversa ativa encontrada para você.\n\n"
+            f"Raw user_data:\n`{user_data.get(user_id)}`"
+        )
 
     await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
-
 
 # --- NOVO: COMANDO /CUPOM ---
 async def cupom_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
