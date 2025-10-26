@@ -1049,11 +1049,14 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await show_main_admin_menu(update, context, is_edit=update.callback_query is not None)
     return SELECTING_ACTION
 
+# admin_handlers.py -- SUBSTITUA TODA A FUNÇÃO get_admin_conversation_handler() POR ESTA
+
 def get_admin_conversation_handler() -> ConversationHandler:
     """Retorna o ConversationHandler completo com todos os fluxos administrativos."""
     return ConversationHandler(
         entry_points=[CommandHandler("admin", admin_panel)],
         states={
+            # --- NÍVEL 1: MENU PRINCIPAL ---
             SELECTING_ACTION: [
                 CallbackQueryHandler(view_stats, pattern="^admin_stats$"),
                 CallbackQueryHandler(manage_referrals_start, pattern="^admin_referrals$"),
@@ -1068,58 +1071,23 @@ def get_admin_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(grant_new_group_start, pattern="^admin_grant_new_group$"),
                 CallbackQueryHandler(cancel, pattern="^admin_cancel$"),
             ],
-            MANAGING_REFERRALS: [
-                CallbackQueryHandler(manage_referrals_start, pattern="^admin_referrals$"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-            ],
-            GETTING_USER_ID_FOR_CHECK: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, check_user_receive_id),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-            ],
-            GETTING_TRANSACTION_SEARCH: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, search_transactions_execute),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-            ],
-            GETTING_USER_ID_FOR_GRANT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, grant_access_receive_id),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-            ],
-            SELECTING_PLAN_FOR_GRANT: [
-                CallbackQueryHandler(grant_access_select_plan, pattern="^grant_plan_"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-            ],
-            GETTING_USER_ID_FOR_REVOKE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, revoke_access_receive_id),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-            ],
-            CONFIRMING_REVOKE: [
-                CallbackQueryHandler(revoke_access_confirm, pattern="^revoke_confirm$"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-            ],
-            GETTING_BROADCAST_MESSAGE: [
-                MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO | filters.Document.ALL) & ~filters.COMMAND, broadcast_receive_message),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-            ],
-            CONFIRMING_BROADCAST: [
-                CallbackQueryHandler(broadcast_confirm, pattern="^broadcast_confirm$"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-            ],
-            SELECTING_NEW_GROUP: [
-                CallbackQueryHandler(grant_new_group_select_group, pattern="^new_group_select_"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-            ],
-            CONFIRMING_NEW_GROUP_BROADCAST: [
-                CallbackQueryHandler(grant_new_group_confirm, pattern="^new_group_confirm$"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-            ],
-            VIEWING_LOGS: [
-                CallbackQueryHandler(view_logs, pattern="^admin_view_logs$"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
-            ],
+
+            # --- FLUXOS DIRETOS DO MENU PRINCIPAL ---
+            MANAGING_REFERRALS: [CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$")],
+            GETTING_USER_ID_FOR_CHECK: [MessageHandler(filters.TEXT & ~filters.COMMAND, check_user_receive_id)],
+            GETTING_TRANSACTION_SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_transactions_execute)],
+            GETTING_USER_ID_FOR_GRANT: [MessageHandler(filters.TEXT & ~filters.COMMAND, grant_access_receive_id)],
+            SELECTING_PLAN_FOR_GRANT: [CallbackQueryHandler(grant_access_select_plan, pattern="^grant_plan_")],
+            GETTING_USER_ID_FOR_REVOKE: [MessageHandler(filters.TEXT & ~filters.COMMAND, revoke_access_receive_id)],
+            CONFIRMING_REVOKE: [CallbackQueryHandler(revoke_access_confirm, pattern="^revoke_confirm$")],
+            GETTING_BROADCAST_MESSAGE: [MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO | filters.Document.ALL) & ~filters.COMMAND, broadcast_receive_message)],
+            CONFIRMING_BROADCAST: [CallbackQueryHandler(broadcast_confirm, pattern="^broadcast_confirm$")],
+            VIEWING_LOGS: [CallbackQueryHandler(view_logs, pattern="^admin_view_logs$")],
+
+            # --- FLUXO DE GERENCIAMENTO DE GRUPOS ---
             MANAGING_GROUPS: [
                 CallbackQueryHandler(add_group_start, pattern="^group_add$"),
                 CallbackQueryHandler(remove_group_start, pattern="^group_remove$"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
             ],
             GETTING_GROUP_FORWARD: [
                 MessageHandler(filters.FORWARDED & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP | filters.ChatType.CHANNEL), add_group_receive_forward),
@@ -1137,31 +1105,35 @@ def get_admin_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(remove_group_execute, pattern="^remove_group_confirmed$"),
                 CallbackQueryHandler(back_to_manage_groups, pattern="^admin_manage_groups_back$"),
             ],
+
+            # --- FLUXO DE GERENCIAMENTO DE CUPONS ---
             MANAGING_COUPONS: [
                 CallbackQueryHandler(create_coupon_start, pattern="^coupon_create$"),
                 CallbackQueryHandler(deactivate_coupon_start, pattern="^coupon_deactivate$"),
                 CallbackQueryHandler(reactivate_coupon_start, pattern="^coupon_reactivate$"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
             ],
             GETTING_COUPON_CODE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_code),
-                CallbackQueryHandler(back_to_manage_coupons, pattern="^admin_manage_coupons$"),
+                CallbackQueryHandler(back_to_manage_coupons, pattern="^back_to_manage_coupons$"),
             ],
             GETTING_COUPON_DISCOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_discount)],
             GETTING_COUPON_VALIDITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_validity)],
             GETTING_COUPON_USAGE_LIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, create_coupon_get_usage_limit)],
             GETTING_COUPON_TO_DEACTIVATE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, deactivate_coupon_execute),
-                CallbackQueryHandler(back_to_manage_coupons, pattern="^admin_manage_coupons$"), # CORRIGIDO
+                CallbackQueryHandler(back_to_manage_coupons, pattern="^back_to_manage_coupons$"),
             ],
             GETTING_COUPON_TO_REACTIVATE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, reactivate_coupon_execute),
-                CallbackQueryHandler(back_to_manage_coupons, pattern="^admin_manage_coupons$"), # CORRIGIDO
+                CallbackQueryHandler(back_to_manage_coupons, pattern="^back_to_manage_coupons$"),
             ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
-            CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"), # Re-adicionado aqui como último recurso
+            CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
+            # Adicionar handlers de voltar aqui é seguro SE eles retornarem o estado correto
+            CallbackQueryHandler(back_to_manage_groups, pattern="^admin_manage_groups_back$"),
+            CallbackQueryHandler(back_to_manage_coupons, pattern="^admin_manage_coupons$"),
             CommandHandler("admin", admin_panel),
         ],
         per_user=True,
