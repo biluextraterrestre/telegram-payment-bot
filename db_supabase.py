@@ -239,19 +239,21 @@ async def create_manual_subscription(db_user_id: int, product_id: int, admin_not
         if product.get('duration_days'):
             end_date = start_date + timedelta(days=product['duration_days'])
 
+        insert_data = {
+            "user_id": db_user_id,
+            "product_id": product_id,
+            "mp_payment_id": admin_notes,
+            "status": "active",
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat() if end_date else None,
+        }
+
+        # --- CORREÇÃO APLICADA AQUI ---
         response = await asyncio.to_thread(
-            lambda: supabase.table('subscriptions')
-            .insert({
-                "user_id": db_user_id,
-                "product_id": product_id,
-                "mp_payment_id": admin_notes,
-                "status": "active",
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat() if end_date else None
-            })
-            .select()
-            .execute()
+            lambda: supabase.table('subscriptions').insert(insert_data).execute()
         )
+        # --- FIM DA CORREÇÃO ---
+
         await create_log('manual_subscription', f"Assinatura manual criada para usuário {db_user_id} - {admin_notes}")
         logger.info(f"✅ [DB] Assinatura manual criada para usuário {db_user_id}.")
         return response.data[0] if response.data else None
@@ -352,7 +354,14 @@ async def create_coupon(
             "valid_from": valid_from.isoformat() if valid_from else None,
             "valid_until": valid_until.isoformat() if valid_until else None
         }
-        response = await asyncio.to_thread(lambda: supabase.table('coupons').insert(insert_data).select().execute())
+
+        # --- CORREÇÃO APLICADA AQUI ---
+        # O retorno dos dados é solicitado dentro do .execute()
+        response = await asyncio.to_thread(
+            lambda: supabase.table('coupons').insert(insert_data).execute()
+        )
+        # --- FIM DA CORREÇÃO ---
+
         await create_log('coupon_created', f"Cupom criado: {code}")
         return response.data[0] if response.data else None
     except Exception as e:
@@ -423,7 +432,18 @@ async def create_referral_record(referrer_id: int, referred_id: int, code: str) 
     """Cria um registro na tabela de indicações."""
     if not supabase: return None
     try:
-        response = await asyncio.to_thread(lambda: supabase.table('referrals').insert({"referrer_id": referrer_id, "referred_id": referred_id, "referral_code": code.upper()}).select().execute())
+        insert_data = {
+            "referrer_id": referrer_id,
+            "referred_id": referred_id,
+            "referral_code": code.upper()
+        }
+
+        # --- CORREÇÃO APLICADA AQUI ---
+        response = await asyncio.to_thread(
+            lambda: supabase.table('referrals').insert(insert_data).execute()
+        )
+        # --- FIM DA CORREÇÃO ---
+
         return response.data[0] if response.data else None
     except Exception as e:
         logger.error(f"❌ [DB] Erro ao criar registro de indicação: {e}", exc_info=True)
