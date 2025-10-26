@@ -36,16 +36,25 @@ async def get_or_create_user(tg_user: TelegramUser) -> dict | None:
             "first_name": tg_user.first_name,
             "username": tg_user.username,
         }
-        # Upsert tenta inserir; se o telegram_user_id já existir, ele atualiza.
-        # É mais eficiente que fazer SELECT e depois INSERT/UPDATE.
+
+        # --- CORREÇÃO APLICADA AQUI ---
+        # A chamada .select() foi removida. O upsert já retorna os dados por padrão.
         response = await asyncio.to_thread(
             lambda: supabase.table('users')
             .upsert(user_data, on_conflict='telegram_user_id')
-            .select('id, first_name, username, created_at, referral_code') # Retorna os dados necessários
             .execute()
         )
+        # --- FIM DA CORREÇÃO ---
+
         if response.data:
+            # Garante que o log de novo usuário seja criado apenas quando necessário
+            created_at_str = response.data[0].get('created_at')
+            created_at_dt = datetime.fromisoformat(created_at_str)
+            if datetime.now(timezone.utc) - created_at_dt < timedelta(seconds=5):
+                 await create_log('user_created', f"Novo usuário cadastrado: {tg_user.id}")
+
             return response.data[0]
+
         return None
     except Exception as e:
         logger.error(f"❌ [DB] Erro em get_or_create_user para {tg_user.id}: {e}", exc_info=True)
