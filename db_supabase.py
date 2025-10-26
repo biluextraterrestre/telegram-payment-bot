@@ -336,6 +336,48 @@ async def get_all_groups_with_names() -> list[dict]:
         logger.error(f"❌ [DB] Erro ao buscar todos os grupos: {e}", exc_info=True)
         return []
 
+async def add_group(chat_id: int, name: str) -> bool:
+    """Adiciona um novo grupo ao banco de dados."""
+    if not supabase: return False
+    try:
+        await asyncio.to_thread(
+            lambda: supabase.table('groups')
+            .upsert({"telegram_chat_id": chat_id, "name": name}, on_conflict='telegram_chat_id')
+            .execute()
+        )
+        logger.info(f"✅ [DB] Grupo {name} ({chat_id}) adicionado/atualizado com sucesso.")
+        return True
+    except Exception as e:
+        logger.error(f"❌ [DB] Erro ao adicionar o grupo {chat_id}: {e}", exc_info=True)
+        return False
+
+async def remove_group(chat_id: int) -> bool:
+    """Remove um grupo do banco de dados pelo seu telegram_chat_id."""
+    if not supabase: return False
+    try:
+        await asyncio.to_thread(
+            lambda: supabase.table('groups')
+            .delete()
+            .eq('telegram_chat_id', chat_id)
+            .execute()
+        )
+        logger.info(f"✅ [DB] Grupo com chat_id {chat_id} removido com sucesso.")
+        return True
+    except Exception as e:
+        logger.error(f"❌ [DB] Erro ao remover o grupo {chat_id}: {e}", exc_info=True)
+        return False
+
+async def get_group_by_chat_id(chat_id: int) -> dict | None:
+    """Busca os detalhes de um grupo pelo seu telegram_chat_id."""
+    if not supabase: return None
+    try:
+        response = await asyncio.to_thread(
+            lambda: supabase.table('groups').select('*').eq('telegram_chat_id', chat_id).single().execute()
+        )
+        return response.data
+    except Exception:
+        return None
+
 # --- FUNÇÕES DE CUPONS ---
 
 async def get_coupon_by_code(code: str, include_inactive: bool = False) -> dict | None:

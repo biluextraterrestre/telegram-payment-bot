@@ -37,6 +37,12 @@ states_list = [
     'SELECTING_PLAN_FOR_GRANT', 'GETTING_USER_ID_FOR_REVOKE', 'CONFIRMING_REVOKE',
     'GETTING_BROADCAST_MESSAGE', 'CONFIRMING_BROADCAST', 'SELECTING_NEW_GROUP',
     'CONFIRMING_NEW_GROUP_BROADCAST', 'VIEWING_STATS', 'MANAGING_GROUPS',
+
+    # --- NOVOS ESTADOS ADICIONADOS AQUI ---
+    'GETTING_GROUP_FORWARD', 'CONFIRMING_GROUP_ADD', 'GETTING_GROUP_TO_REMOVE',
+    'CONFIRMING_GROUP_REMOVE',
+    # --- FIM DA ADIÇÃO ---
+
     'MANAGING_COUPONS', 'GETTING_COUPON_CODE', 'GETTING_COUPON_DISCOUNT',
     'GETTING_COUPON_VALIDITY', 'GETTING_COUPON_USAGE_LIMIT',
     'GETTING_COUPON_TO_DEACTIVATE', 'GETTING_COUPON_TO_REACTIVATE',
@@ -47,6 +53,12 @@ states_list = [
     SELECTING_PLAN_FOR_GRANT, GETTING_USER_ID_FOR_REVOKE, CONFIRMING_REVOKE,
     GETTING_BROADCAST_MESSAGE, CONFIRMING_BROADCAST, SELECTING_NEW_GROUP,
     CONFIRMING_NEW_GROUP_BROADCAST, VIEWING_STATS, MANAGING_GROUPS,
+
+    # --- NOVOS ESTADOS ADICIONADOS AQUI ---
+    GETTING_GROUP_FORWARD, CONFIRMING_GROUP_ADD, GETTING_GROUP_TO_REMOVE,
+    CONFIRMING_GROUP_REMOVE,
+    # --- FIM DA ADIÇÃO ---
+
     MANAGING_COUPONS, GETTING_COUPON_CODE, GETTING_COUPON_DISCOUNT,
     GETTING_COUPON_VALIDITY, GETTING_COUPON_USAGE_LIMIT,
     GETTING_COUPON_TO_DEACTIVATE, GETTING_COUPON_TO_REACTIVATE,
@@ -216,23 +228,185 @@ async def view_logs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return VIEWING_LOGS
 
 @admin_only
-async def manage_groups_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def manage_groups_start(update: Update, context: ContextTypes.DEFAULT_TYPE, is_edit: bool = False) -> int:
     """Apresenta a lista de grupos cadastrados e as opções de gerenciamento."""
     query = update.callback_query
-    await query.answer()
+    if query:
+        await query.answer()
+
     groups = await db.get_all_groups_with_names()
     text = f"🏢 *Gerenciamento de Grupos*\n\n📊 Total de grupos: {len(groups)}\n\n"
     if groups:
         text += "Grupos cadastrados:\n"
         for i, group in enumerate(groups[:15], 1):
             text += f"{i}. {group.get('name', 'Sem nome')} (`{group['telegram_chat_id']}`)\n"
+    else:
+        text += "Nenhum grupo cadastrado no momento.\n"
+
     keyboard = [
         [InlineKeyboardButton("➕ Adicionar Grupo", callback_data="group_add")],
         [InlineKeyboardButton("🗑️ Remover Grupo", callback_data="group_remove")],
         [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")]
     ]
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if is_edit and query:
+        try:
+            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        except BadRequest as e:
+            if "message is not modified" not in str(e):
+                logger.error(f"Erro ao editar o menu de grupos: {e}")
+    elif update.message:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+
     return MANAGING_GROUPS
+
+# --- FLUXO: ADICIONAR GRUPO ---
+
+@admin_only
+async def add_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Inicia o fluxo para adicionar um novo grupo."""
+    query = update.callback_query
+    await query.answer()
+    keyboard = [[InlineKeyboardButton("⬅️ Voltar", callback_data="admin_manage_groups_back")]]
+
+    text = (
+        "➕ *Adicionar Novo Grupo*\n\n"
+        "1. Adicione este bot ao grupo que deseja cadastrar (ele precisa ter permissões de administrador).\n"
+        "2. Encaminhe qualquer mensagem desse grupo para mim aqui.\n\n"
+        "Eu irei extrair os dados do grupo automaticamente. Use /cancel para abortar."
+    )
+
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+    return GETTING_GROUP_FORWARD
+
+@admin_only
+async def add_group_receive_forward(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Processa a mensagem encaminhada para extrair dados do grupo."""
+    if not update.message or not update.message.forward_from_chat:
+        await update.message.reply_text("❌ Isso não parece ser uma mensagem encaminhada de um grupo. Tente novamente ou use /cancel.")
+        return GETTING_GROUP_FORWARD
+
+    chat = update.message.forward_from_chat
+    # Garante que é um supergrupo ou canal, não um chat privado
+    if chat.type not in ['group', 'supergroup', 'channel']:
+        await update.message.reply_text("❌ O encaminhamento deve ser de um grupo público ou canal. Tente novamente.")
+        return GETTING_GROUP_FORWARD
+
+    context.user_data['new_group_id'] = chat.id
+    context.user_data['new_group_title'] = chat.title
+
+    keyboard = [
+        [InlineKeyboardButton("✅ Sim, Adicionar", callback_data="add_group_confirm")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="admin_manage_groups_back")]
+    ]
+    text = (
+        "🔍 *Confirmação*\n\n"
+        f"Encontrei o seguinte grupo:\n\n"
+        f"📝 **Nome:** {chat.title}\n"
+        f"🆔 **ID:** `{chat.id}`\n\n"
+        "Deseja adicionar este grupo ao sistema?"
+    )
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+    return CONFIRMING_GROUP_ADD
+
+@admin_only
+async def add_group_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Salva o novo grupo no banco de dados e volta para o menu de gerenciamento."""
+    query = update.callback_query
+    await query.answer()
+
+    chat_id = context.user_data.get('new_group_id')
+    chat_title = context.user_data.get('new_group_title')
+
+    if not chat_id or not chat_title:
+        await query.edit_message_text("❌ Erro: Dados do grupo não encontrados na sessão. Operação cancelada.")
+    else:
+        success = await db.add_group(chat_id, chat_title)
+        if success:
+            await query.edit_message_text(f"✅ Grupo '**{chat_title}**' adicionado com sucesso!")
+            await db.create_log('admin_action', f"Admin {update.effective_user.id} adicionou o grupo {chat_title} ({chat_id})")
+        else:
+            await query.edit_message_text(f"❌ Erro ao adicionar o grupo. Ele pode já estar cadastrado. Verifique os logs.")
+
+    context.user_data.clear()
+    await asyncio.sleep(2)
+    return await manage_groups_start(update, context, is_edit=True) # Volta para a lista de grupos
+
+# --- FLUXO: REMOVER GRUPO ---
+
+@admin_only
+async def remove_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Mostra os grupos cadastrados e pede para o admin escolher qual remover."""
+    query = update.callback_query
+    await query.answer()
+    groups = await db.get_all_groups_with_names()
+
+    if not groups:
+        await query.edit_message_text("Nenhum grupo cadastrado para remover.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar", callback_data="admin_manage_groups_back")]]))
+        return MANAGING_GROUPS
+
+    keyboard = []
+    for group in groups:
+        keyboard.append([InlineKeyboardButton(f"🗑️ {group['name']}", callback_data=f"remove_group_{group['telegram_chat_id']}")])
+    keyboard.append([InlineKeyboardButton("⬅️ Voltar", callback_data="admin_manage_groups_back")])
+
+    await query.edit_message_text("🗑️ *Remover Grupo*\n\nSelecione o grupo que deseja remover da lista:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return GETTING_GROUP_TO_REMOVE
+
+@admin_only
+async def remove_group_confirm_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Pede a confirmação final antes de remover o grupo."""
+    query = update.callback_query
+    await query.answer()
+    chat_id_to_remove = int(query.data.split('_')[-1])
+    context.user_data['group_to_remove_id'] = chat_id_to_remove
+
+    group = await db.get_group_by_chat_id(chat_id_to_remove)
+    if not group:
+        await query.edit_message_text("❌ Grupo não encontrado. Pode já ter sido removido.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar", callback_data="admin_manage_groups_back")]]))
+        return MANAGING_GROUPS
+
+    keyboard = [
+        [InlineKeyboardButton("✅ SIM, REMOVER AGORA", callback_data="remove_group_confirmed")],
+        [InlineKeyboardButton("❌ NÃO, CANCELAR", callback_data="admin_manage_groups_back")]
+    ]
+    text = (
+        f"⚠️ *ATENÇÃO* ⚠️\n\n"
+        f"Você tem certeza que deseja remover o grupo '**{group['name']}**' (`{group['telegram_chat_id']}`) do sistema?\n\n"
+        "Esta ação **não remove** os usuários do grupo, apenas impede que novos membros recebam o link de acesso a ele."
+    )
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+    return CONFIRMING_GROUP_REMOVE
+
+@admin_only
+async def remove_group_execute(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Executa a remoção do grupo do banco de dados."""
+    query = update.callback_query
+    await query.answer()
+    chat_id = context.user_data.get('group_to_remove_id')
+
+    if not chat_id:
+        await query.edit_message_text("❌ Erro: ID do grupo não encontrado na sessão. Operação cancelada.")
+    else:
+        success = await db.remove_group(chat_id)
+        if success:
+            await query.edit_message_text("✅ Grupo removido com sucesso do sistema!")
+            await db.create_log('admin_action', f"Admin {update.effective_user.id} removeu o grupo {chat_id}")
+        else:
+            await query.edit_message_text("❌ Erro ao remover o grupo do banco de dados. Verifique os logs.")
+
+    context.user_data.clear()
+    await asyncio.sleep(2)
+    return await manage_groups_start(update, context, is_edit=True) # Volta para a lista de grupos
+
+@admin_only
+async def back_to_manage_groups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Callback para voltar ao menu de gerenciamento de grupos."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data.clear()
+    return await manage_groups_start(update, context, is_edit=True)
 
 
 # --- SEÇÃO 3: CONSULTA DE DADOS ---
@@ -901,7 +1075,25 @@ def get_admin_conversation_handler() -> ConversationHandler:
             CONFIRMING_BROADCAST: [CallbackQueryHandler(broadcast_confirm, pattern="^broadcast_confirm$")],
             SELECTING_NEW_GROUP: [CallbackQueryHandler(grant_new_group_select_group, pattern="^new_group_select_")],
             CONFIRMING_NEW_GROUP_BROADCAST: [CallbackQueryHandler(grant_new_group_confirm, pattern="^new_group_confirm$")],
-            MANAGING_GROUPS: [CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$")],
+            MANAGING_GROUPS: [
+                CallbackQueryHandler(add_group_start, pattern="^group_add$"),
+                CallbackQueryHandler(remove_group_start, pattern="^group_remove$"),
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
+                CallbackQueryHandler(back_to_manage_groups, pattern="^admin_manage_groups_back$"),
+            ],
+            GETTING_GROUP_FORWARD: [MessageHandler(filters.FORWARDED, add_group_receive_forward)],
+            CONFIRMING_GROUP_ADD: [
+                CallbackQueryHandler(add_group_confirm, pattern="^add_group_confirm$"),
+                CallbackQueryHandler(back_to_manage_groups, pattern="^admin_manage_groups_back$"),
+            ],
+            GETTING_GROUP_TO_REMOVE: [
+                CallbackQueryHandler(remove_group_confirm_choice, pattern="^remove_group_"),
+                CallbackQueryHandler(back_to_manage_groups, pattern="^admin_manage_groups_back$"),
+            ],
+            CONFIRMING_GROUP_REMOVE: [
+                CallbackQueryHandler(remove_group_execute, pattern="^remove_group_confirmed$"),
+                CallbackQueryHandler(back_to_manage_groups, pattern="^admin_manage_groups_back$"),
+            ],
             VIEWING_LOGS: [
                 CallbackQueryHandler(view_logs, pattern="^admin_view_logs$"),
                 CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
