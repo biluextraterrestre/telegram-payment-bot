@@ -164,8 +164,6 @@ async def activate_subscription(mp_payment_id: str) -> dict | None:
     """
     if not supabase: return None
     try:
-        # --- CORREÇÃO DO ERRO 2 ---
-        # A chamada ao banco de dados está agora dentro do bloco try/except.
         sub_response = await asyncio.to_thread(
             lambda: supabase.table('subscriptions')
             .select('*, user:users(*), product:products(*)')
@@ -173,7 +171,6 @@ async def activate_subscription(mp_payment_id: str) -> dict | None:
             .maybe_single()
             .execute()
         )
-        # --- FIM DA CORREÇÃO ---
 
         if not sub_response or not sub_response.data:
             logger.warning(f"⚠️ [DB] Assinatura com mp_payment_id {mp_payment_id} não encontrada no DB.")
@@ -208,9 +205,13 @@ async def activate_subscription(mp_payment_id: str) -> dict | None:
             "end_date": new_end_date.isoformat() if new_end_date else None
         }
 
+        # --- LINHA CORRIGIDA ---
+        # O método .select() deve vir ANTES do filtro .eq()
         final_response = await asyncio.to_thread(
             lambda: supabase.table('subscriptions').update(update_payload).select('*, user:users(*)').eq('id', subscription['id']).single().execute()
         )
+        # --- FIM DA CORREÇÃO ---
+
         if final_response.data:
             await create_log('subscription_activated', f"Assinatura {subscription['id']} ativada para usuário {user['telegram_user_id']}")
             logger.info(f"✅ [DB] Assinatura {subscription['id']} ativada com sucesso.")

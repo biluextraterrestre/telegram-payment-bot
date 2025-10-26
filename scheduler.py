@@ -24,9 +24,7 @@ TIMEZONE_BR = timezone(timedelta(hours=-3))
 # --- FUNÇÃO REUTILIZÁVEL ---
 async def kick_user_from_all_groups(user_id: int, bot: Bot):
     """Expulsa e desbane um usuário de todos os grupos listados no DB."""
-    # Conexão com Supabase dentro da função para ser autônoma
     supabase_client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-
     groups_response = await asyncio.to_thread(
         lambda: supabase_client.table('groups').select('telegram_chat_id').execute()
     )
@@ -46,12 +44,17 @@ async def kick_user_from_all_groups(user_id: int, bot: Bot):
         except Forbidden:
             logger.warning(f"[kick_user] Sem permissão para remover {user_id} do grupo {group_id}.")
         except BadRequest as e:
-            if "user not found" in str(e) or "member not found" in str(e):
+            # --- LÓGICA APRIMORADA AQUI ---
+            error_text = str(e).lower()
+            if "user not found" in error_text or "member not found" in error_text:
                 logger.info(f"[kick_user] Usuário {user_id} já não estava no grupo {group_id}.")
+            elif "can't remove chat owner" in error_text:
+                logger.warning(f"[kick_user] Não é possível remover o usuário {user_id} do grupo {group_id} porque ele é o proprietário.")
             else:
                 logger.error(f"[kick_user] Erro do Telegram ao remover {user_id} do {group_id}: {e}")
-    return removed_count
+            # --- FIM DA LÓGICA APRIMORADA ---
 
+    return removed_count
 # --- FUNÇÕES DO SCHEDULER (A FUNÇÃO QUE FALTAVA FOI REINSERIDA) ---
 
 async def find_and_process_expiring_subscriptions(supabase: Client, bot: Bot):
