@@ -1,4 +1,4 @@
-# --- admin_handlers.py (VERSÃO FINAL COMPLETA E ORGANIZADA) ---
+# --- admin_handlers.py (VERSÃO FINAL COMPLETA E CORRIGIDA) ---
 
 import os
 import logging
@@ -39,13 +39,8 @@ states_list = [
     'CONFIRMING_NEW_GROUP_BROADCAST', 'VIEWING_STATS', 'MANAGING_GROUPS',
     'MANAGING_COUPONS', 'GETTING_COUPON_CODE', 'GETTING_COUPON_DISCOUNT',
     'GETTING_COUPON_VALIDITY', 'GETTING_COUPON_USAGE_LIMIT',
-
-    # --- NOVOS ESTADOS ADICIONADOS AQUI (ORDEM CORRIGIDA) ---
     'GETTING_GROUP_FORWARD', 'CONFIRMING_GROUP_ADD', 'GETTING_GROUP_TO_REMOVE',
-    'CONFIRMING_GROUP_REMOVE',
-    # --- FIM DA ADIÇÃO ---
-
-    'GETTING_COUPON_TO_DEACTIVATE', 'GETTING_COUPON_TO_REACTIVATE',
+    'CONFIRMING_GROUP_REMOVE', 'GETTING_COUPON_TO_DEACTIVATE', 'GETTING_COUPON_TO_REACTIVATE',
     'VIEWING_LOGS', 'GETTING_TRANSACTION_SEARCH', 'MANAGING_REFERRALS'
 ]
 (
@@ -54,13 +49,8 @@ states_list = [
     GETTING_BROADCAST_MESSAGE, CONFIRMING_BROADCAST, SELECTING_NEW_GROUP,
     CONFIRMING_NEW_GROUP_BROADCAST, VIEWING_STATS, MANAGING_GROUPS,
     MANAGING_COUPONS, GETTING_COUPON_CODE, GETTING_COUPON_DISCOUNT,
-    GETTING_COUPON_VALIDITY, GETTING_COUPON_USAGE_LIMIT,
-
-    # --- NOVOS ESTADOS ADICIONADOS AQUI (ORDEM CORRIGIDA) ---
-    GETTING_GROUP_FORWARD, CONFIRMING_GROUP_ADD, GETTING_GROUP_TO_REMOVE,
-    CONFIRMING_GROUP_REMOVE,
-    # --- FIM DA ADIÇÃO ---
-
+    GETTING_COUPON_VALIDITY, GETTING_COUPON_USAGE_LIMIT, GETTING_GROUP_FORWARD,
+    CONFIRMING_GROUP_ADD, GETTING_GROUP_TO_REMOVE, CONFIRMING_GROUP_REMOVE,
     GETTING_COUPON_TO_DEACTIVATE, GETTING_COUPON_TO_REACTIVATE,
     VIEWING_LOGS, GETTING_TRANSACTION_SEARCH, MANAGING_REFERRALS
 ) = range(len(states_list))
@@ -121,7 +111,7 @@ async def show_main_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.error(f"Erro ao editar menu principal: {e}")
 
 @admin_only
-async def get_admin_conversation_handler_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Ponto de entrada para o comando /admin."""
     await show_main_admin_menu(update, context)
     return SELECTING_ACTION
@@ -140,7 +130,7 @@ async def back_to_manage_coupons(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     context.user_data.clear()
-    await manage_coupons_start(update, context) # Chama a função correta de cupons
+    await manage_coupons_start(update, context)
     return MANAGING_COUPONS
 
 
@@ -236,6 +226,8 @@ async def view_logs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await query.edit_message_text("❌ Erro ao carregar os logs.")
     return VIEWING_LOGS
 
+# --- SEÇÃO DE GERENCIAMENTO DE GRUPOS COM LOGS DE DEBUG ---
+
 @admin_only
 async def manage_groups_start(update: Update, context: ContextTypes.DEFAULT_TYPE, is_edit: bool = False) -> int:
     """Apresenta a lista de grupos cadastrados e as opções de gerenciamento."""
@@ -274,6 +266,8 @@ async def manage_groups_start(update: Update, context: ContextTypes.DEFAULT_TYPE
         # --- DEBUG LOGS ---
         logger.info("-> [DEBUG] Preparando para editar a mensagem do menu de grupos...")
         if is_edit and query:
+            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        elif query: # Garante que o clique no botão edite a mensagem
             await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         elif update.message:
             await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
@@ -320,7 +314,6 @@ async def add_group_receive_forward(update: Update, context: ContextTypes.DEFAUL
         return GETTING_GROUP_FORWARD
 
     chat = update.message.forward_from_chat
-    # Garante que é um supergrupo ou canal, não um chat privado
     if chat.type not in ['group', 'supergroup', 'channel']:
         await update.message.reply_text("❌ O encaminhamento deve ser de um grupo público ou canal. Tente novamente.")
         return GETTING_GROUP_FORWARD
@@ -363,7 +356,7 @@ async def add_group_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     context.user_data.clear()
     await asyncio.sleep(2)
-    return await manage_groups_start(update, context, is_edit=True) # Volta para a lista de grupos
+    return await manage_groups_start(update, context, is_edit=True)
 
 # --- FLUXO: REMOVER GRUPO ---
 
@@ -430,7 +423,7 @@ async def remove_group_execute(update: Update, context: ContextTypes.DEFAULT_TYP
 
     context.user_data.clear()
     await asyncio.sleep(2)
-    return await manage_groups_start(update, context, is_edit=True) # Volta para a lista de grupos
+    return await manage_groups_start(update, context, is_edit=True)
 
 @admin_only
 async def back_to_manage_groups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -438,11 +431,13 @@ async def back_to_manage_groups(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
     context.user_data.clear()
-    await manage_groups_start(update, context, is_edit=True) # Chama a função correta
+    await manage_groups_start(update, context, is_edit=True)
     return MANAGING_GROUPS
 
 
 # --- SEÇÃO 3: CONSULTA DE DADOS ---
+# ... (todas as outras funções como check_user, grant_access, revoke, broadcast, cupons, etc. permanecem aqui) ...
+# (O código foi omitido para brevidade, mas ele deve estar presente no seu arquivo)
 
 @admin_only
 async def search_transactions_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -553,7 +548,7 @@ async def check_user_receive_id(update: Update, context: ContextTypes.DEFAULT_TY
     await show_main_admin_menu(update, context)
     return SELECTING_ACTION
 
-# --- SEÇÃO 4: AÇÕES MANUAIS (CONCEDER, REVOGAR, BROADCAST, NOVO GRUPO) ---
+# ... COLE AQUI TODAS AS SUAS OUTRAS FUNÇÕES DE ADMIN (grant_access, revoke, broadcast, cupons, etc.)
 
 @admin_only
 async def grant_access_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -843,8 +838,6 @@ async def run_new_group_broadcast(context: ContextTypes.DEFAULT_TYPE, chat_id: i
     elapsed = (datetime.now() - start_time).seconds
     await context.bot.edit_message_text(chat_id=admin_chat_id, message_id=admin_message_id, text=f"✉️ *Envio de Convites Concluído!*\n\n✅ Enviados: {sent}\n👤 Já eram membros: {already_in}\n❌ Falhas: {failed}\n⏱️ Duração: {elapsed//60}m {elapsed%60}s", parse_mode=ParseMode.MARKDOWN)
 
-# --- SEÇÃO 5: GERENCIAMENTO DE CUPONS ---
-
 @admin_only
 async def manage_coupons_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Mostra o painel de gerenciamento de cupons."""
@@ -894,7 +887,7 @@ async def create_coupon_get_code(update: Update, context: ContextTypes.DEFAULT_T
     if not code.isalnum() or len(code) < 3:
         await update.message.reply_text("❌ Código inválido. Use apenas letras e números (mínimo 3 caracteres). Tente novamente.")
         return GETTING_COUPON_CODE
-    existing = await db.get_coupon_by_code(code, include_inactive=True) # Verifica se já existe, mesmo inativo
+    existing = await db.get_coupon_by_code(code, include_inactive=True)
     if existing:
         await update.message.reply_text("❌ Este código já existe. Escolha outro.")
         return GETTING_COUPON_CODE
@@ -949,14 +942,8 @@ async def create_coupon_get_usage_limit(update: Update, context: ContextTypes.DE
 
     if context.user_data.get('coupon_needs_validity'):
         try:
-            # Converte a string de data para um objeto datetime "ingênuo" (sem fuso horário)
             valid_until_naive = datetime.strptime(text_input, '%d/%m/%Y')
-
-            # --- CORREÇÃO APLICADA AQUI ---
-            # Associa o fuso horário ao objeto datetime e define o horário para o final do dia
             valid_until = valid_until_naive.replace(hour=23, minute=59, second=59, tzinfo=TIMEZONE_BR)
-            # --- FIM DA CORREÇÃO ---
-
             if valid_until < datetime.now(TIMEZONE_BR):
                 await update.message.reply_text("❌ A data de expiração deve ser no futuro. Tente novamente.")
                 return GETTING_COUPON_USAGE_LIMIT
@@ -985,10 +972,7 @@ async def create_coupon_get_usage_limit(update: Update, context: ContextTypes.DE
             "valid_until": context.user_data.get('coupon_valid_until'),
             "usage_limit": usage_limit
         }
-
-        # Adiciona o campo valid_from que estava faltando na chamada
         coupon_data['valid_from'] = None
-
         coupon = await db.create_coupon(**coupon_data)
 
         if coupon:
@@ -1076,11 +1060,8 @@ def get_admin_conversation_handler() -> ConversationHandler:
     """Retorna o ConversationHandler completo com todos os fluxos administrativos."""
     return ConversationHandler(
         entry_points=[CommandHandler("admin", admin_panel)],
-
         name="admin-conversation",
-
         states={
-            # --- NÍVEL 1: MENU PRINCIPAL ---
             SELECTING_ACTION: [
                 CallbackQueryHandler(view_stats, pattern="^admin_stats$"),
                 CallbackQueryHandler(manage_referrals_start, pattern="^admin_referrals$"),
@@ -1095,8 +1076,6 @@ def get_admin_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(grant_new_group_start, pattern="^admin_grant_new_group$"),
                 CallbackQueryHandler(cancel, pattern="^admin_cancel$"),
             ],
-
-            # --- FLUXOS DIRETOS DO MENU PRINCIPAL ---
             MANAGING_REFERRALS: [CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$")],
             GETTING_USER_ID_FOR_CHECK: [MessageHandler(filters.TEXT & ~filters.COMMAND, check_user_receive_id)],
             GETTING_TRANSACTION_SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_transactions_execute)],
@@ -1107,12 +1086,9 @@ def get_admin_conversation_handler() -> ConversationHandler:
             GETTING_BROADCAST_MESSAGE: [MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO | filters.Document.ALL) & ~filters.COMMAND, broadcast_receive_message)],
             CONFIRMING_BROADCAST: [CallbackQueryHandler(broadcast_confirm, pattern="^broadcast_confirm$")],
             VIEWING_LOGS: [CallbackQueryHandler(view_logs, pattern="^admin_view_logs$")],
-
-            # --- FLUXO DE GERENCIAMENTO DE GRUPOS ---
             MANAGING_GROUPS: [
                 CallbackQueryHandler(add_group_start, pattern="^group_add$"),
                 CallbackQueryHandler(remove_group_start, pattern="^group_remove$"),
-                # --- LINHA CRÍTICA ADICIONADA AQUI ---
                 CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
             ],
             GETTING_GROUP_FORWARD: [
@@ -1131,13 +1107,10 @@ def get_admin_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(remove_group_execute, pattern="^remove_group_confirmed$"),
                 CallbackQueryHandler(back_to_manage_groups, pattern="^admin_manage_groups_back$"),
             ],
-
-            # --- FLUXO DE GERENCIAMENTO DE CUPONS ---
             MANAGING_COUPONS: [
                 CallbackQueryHandler(create_coupon_start, pattern="^coupon_create$"),
                 CallbackQueryHandler(deactivate_coupon_start, pattern="^coupon_deactivate$"),
                 CallbackQueryHandler(reactivate_coupon_start, pattern="^coupon_reactivate$"),
-                # Adicionando o botão de voltar aqui também por segurança
                 CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
             ],
             GETTING_COUPON_CODE: [
