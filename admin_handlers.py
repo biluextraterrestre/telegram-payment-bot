@@ -1049,8 +1049,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await show_main_admin_menu(update, context, is_edit=update.callback_query is not None)
     return SELECTING_ACTION
 
-# admin_handlers.py -- SUBSTITUA TODA A FUNÇÃO get_admin_conversation_handler() POR ESTA
-
 def get_admin_conversation_handler() -> ConversationHandler:
     """Retorna o ConversationHandler completo com todos os fluxos administrativos."""
     return ConversationHandler(
