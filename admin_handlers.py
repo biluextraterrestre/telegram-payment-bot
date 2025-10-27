@@ -709,7 +709,7 @@ async def grant_access_select_plan(update: Update, context: ContextTypes.DEFAULT
 
             # Envia links apenas se for uma nova concessão, não uma extensão
             if action_log == "concedeu":
-                await send_access_links(context.bot, telegram_user_id, result_sub.get('mp_payment_id', 'manual'))
+                await send_access_links(context.bot, telegram_user_id, result_sub.get('mp_payment_id', 'manual'), access_type='purchase')
 
             await query.edit_message_text(text=f"✅ Acesso {action_log} com sucesso para o usuário {telegram_user_id}!")
 

@@ -209,7 +209,7 @@ async def meuslinks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if subscription and subscription.get('status') == 'active':
         await update.message.reply_text("📬 Verificando seus acessos e gerando novos links...")
-        await send_access_links(context.bot, tg_user.id, subscription['mp_payment_id'], is_support_request=True)
+        await send_access_links(context.bot, tg_user.id, subscription['mp_payment_id'], access_type='support')
     else:
         await update.message.reply_text(
             "❌ Você não possui uma assinatura ativa no momento.\n\n"
@@ -623,7 +623,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         subscription = await db.get_user_active_subscription(tg_user.id)
         if subscription and subscription.get('status') == 'active':
             await query.edit_message_text("Encontramos sua assinatura ativa! Verificando seus acessos e reenviando links se necessário...")
-            await send_access_links(context.bot, tg_user.id, subscription['mp_payment_id'], is_support_request=True)
+            await send_access_links(context.bot, tg_user.id, subscription['mp_payment_id'], access_type='support')
         else:
             await query.edit_message_text("Não encontrei uma assinatura ativa para você. Se você já pagou, use a opção 'Ajuda com Pagamento' ou aguarde alguns minutos pela confirmação.")
 
