@@ -551,6 +551,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         else:
             await query.edit_message_text(text="Desculpe, ocorreu um erro ao gerar sua cobrança. Tente novamente mais tarde ou use /suporte.")
 
+    # --- NOVA LÓGICA DE DEGUSTAÇÃO ---
+    elif data == 'start_trial':
+        await query.edit_message_text("Verificando sua elegibilidade para a degustação...")
+
+        db_user = await db.get_or_create_user(tg_user)
+        can_start_trial = await db.check_and_set_trial_used(db_user['id'])
+
+        if can_start_trial:
+            await query.edit_message_text("✅ Você é elegível! Gerando seu acesso temporário...")
+            trial_sub = await db.create_trial_subscription(db_user['id'])
+
+            if trial_sub:
+                await send_access_links(context.bot, tg_user.id, trial_sub['mp_payment_id'])
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="⚠️ **Atenção:** Seu acesso de degustação expira em 30 minutos! Após esse período, você será removido(a) automaticamente dos grupos."
+                )
+            else:
+                await query.edit_message_text("❌ Ocorreu um erro ao gerar seu acesso. Por favor, contate o suporte.")
+        else:
+            await query.edit_message_text("❌ Você já utilizou seu período de degustação. Para continuar, por favor, escolha um de nossos planos.")
+            await asyncio.sleep(3)
+            # Reenvia as opções do /start para o usuário
+            await start(update, context)
+
     # Fluxo de Suporte
     elif data == 'support_resend_links':
         await query.edit_message_text("Verificando sua assinatura, um momento...")

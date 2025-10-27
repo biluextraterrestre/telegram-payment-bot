@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 url: str = os.getenv("SUPABASE_URL")
 key: str = os.getenv("SUPABASE_KEY")
 TIMEZONE_BR = timezone(timedelta(hours=-3))
+TRIAL_PRODUCT_ID = 3 # Produto Degustação
 
 supabase: Client = None
 if not url or not key:
@@ -752,3 +753,56 @@ async def search_transactions(search_term: str) -> List[dict]:
     except Exception as e:
         logger.error(f"❌ [DB] Erro ao buscar transações com termo '{search_term}': {e}", exc_info=True)
         return []
+
+# --- FUNÇÕES DO PRODUTO DEGUSTAÇÃO ---
+
+async def check_and_set_trial_used(db_user_id: int) -> bool:
+    """
+    Verifica se o usuário já usou o trial. Se não, marca como usado e retorna True.
+    Se já usou, retorna False.
+    """
+    if not supabase: return False
+    try:
+        # Primeiro, verifica o status atual
+        user_response = await asyncio.to_thread(
+            lambda: supabase.table('users').select('has_used_trial').eq('id', db_user_id).single().execute()
+        )
+        if not user_response.data or user_response.data.get('has_used_trial'):
+            return False # Usuário não encontrado ou trial já usado
+
+        # Se chegou aqui, o trial não foi usado. Marca como usado.
+        await asyncio.to_thread(
+            lambda: supabase.table('users').update({'has_used_trial': True}).eq('id', db_user_id).execute()
+        )
+        return True # Sucesso, pode prosseguir com o trial
+    except Exception as e:
+        logger.error(f"❌ [DB] Erro ao verificar e marcar trial para user_id {db_user_id}: {e}", exc_info=True)
+        return False
+
+async def create_trial_subscription(db_user_id: int) -> dict | None:
+    """Cria uma assinatura de degustação de 30 minutos."""
+    if not supabase: return None
+    try:
+        start_date = datetime.now(TIMEZONE_BR)
+        end_date = start_date + timedelta(minutes=30)
+        trial_notes = f"trial_access_{db_user_id}_{start_date.timestamp()}"
+
+        insert_data = {
+            "user_id": db_user_id,
+            "product_id": TRIAL_PRODUCT_ID,
+            "mp_payment_id": trial_notes,
+            "status": "active",
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "final_price": 0.00,
+        }
+
+        response = await asyncio.to_thread(
+            lambda: supabase.table('subscriptions').insert(insert_data).select('*').single().execute()
+        )
+
+        await create_log('trial_started', f"Trial de 30 min iniciado para o usuário {db_user_id}.")
+        return response.data
+    except Exception as e:
+        logger.error(f"❌ [DB] Erro ao criar assinatura de trial: {e}", exc_info=True)
+        return None
