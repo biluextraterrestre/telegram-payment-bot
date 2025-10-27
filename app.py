@@ -108,10 +108,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"- *HENTAI*: Animes adultos *explícitos* trazendo fantasias sem censura para realizar todos os seus fetiches!\n\n" \
         f"- *CAROLINE ZALOG*: Vídeos exclusivos da musa fitness *irresistível* que vão te deixar sem fôlego!\n\n" \
         f"Com uma assinatura mensal ou pagamento único, você desbloqueia *acesso total* a todos esses canais, com atualizações diárias. Pagamento seguro via PIX e *privacidade absoluta* garantida.\n\n" \
-        f"*Escolha seu plano e mergulhe no prazer hoje mesmo!*"
+        f"*Escolha seu plano e mergulhe no prazer hoje mesmo! Se quiser, você pode experimentar nossos canais gratuitamente por 30 minutos.*"
     )
 
     keyboard = [
+        [InlineKeyboardButton("🎁 Degustação Gratuita (30 min)", callback_data='start_trial')],
         [InlineKeyboardButton(f"✅ Assinatura Mensal (R$ {product_monthly['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_MONTHLY}')],
         [InlineKeyboardButton(f"💎 Acesso Vitalício (R$ {product_lifetime['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_LIFETIME}')]
     ]
