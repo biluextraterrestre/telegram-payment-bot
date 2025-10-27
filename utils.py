@@ -53,7 +53,7 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
     group_ids = await db.get_all_group_ids()
     if not group_ids:
         logger.error(f"CRÍTICO: Nenhum grupo encontrado no DB para enviar links ao usuário {user_id}.")
-        message = "⚠️ Tivemos um problema interno para buscar os grupos\\. Nossa equipe foi notificada\\."
+        message = escape_markdown("⚠️ Tivemos um problema interno para buscar os grupos. Nossa equipe foi notificada.", version=2)
         await bot.send_message(chat_id=user_id, text=message, parse_mode=ParseMode.MARKDOWN_V2)
         return
 
@@ -68,7 +68,8 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
             member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
             if member.status in ['member', 'administrator', 'creator']:
                 chat = await bot.get_chat(chat_id)
-                escaped_title = escape_markdown(chat.title, version=2)
+                # Esta parte já estava correta: escapa o título e DEPOIS aplica o negrito
+                escaped_title = escape_markdown(chat.title or f"Grupo {chat_id}", version=2)
                 groups_already_in_text += f"✅ Você já é membro do grupo: *{escaped_title}*\n\n"
                 continue
         except BadRequest as e:
@@ -99,15 +100,18 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
         await asyncio.sleep(0.2)
 
 
-    # --- CORREÇÃO DEFINITIVA: Montando a mensagem com escape manual e cuidadoso ---
+    # --- CORREÇÃO ROBUSTA: Construindo a mensagem de forma segura ---
     message_parts = []
 
     if access_type == 'trial':
-        message_parts.append("🎁 Seu acesso de degustação está liberado\\!\n\nExplore nossos canais pelos próximos 30 minutos\\. Aqui estão seus links de acesso:\n\n")
+        header = "🎁 Seu acesso de degustação está liberado!\n\nExplore nossos canais pelos próximos 30 minutos. Aqui estão seus links de acesso:\n\n"
+        message_parts.append(escape_markdown(header, version=2))
     elif access_type == 'support':
-        message_parts.append("Aqui estão o status e os novos links de acesso, se necessário:\n\n")
-    else: # 'purchase' é o padrão
-        message_parts.append("🎉 Pagamento confirmado\\!\n\nSeja bem\\-vindo\\(a\\)\\! Aqui estão seus links de acesso:\n\n")
+        header = "Aqui estão o status e os novos links de acesso, se necessário:\n\n"
+        message_parts.append(header) # Este texto não tem caracteres especiais
+    else: # 'purchase'
+        header = "🎉 Pagamento confirmado!\n\nSeja bem-vindo(a)! Aqui estão seus links de acesso:\n\n"
+        message_parts.append(escape_markdown(header, version=2))
 
     if links_to_send_text:
         message_parts.append(links_to_send_text)
@@ -116,25 +120,35 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
         message_parts.append(groups_already_in_text)
 
     if new_links_generated > 0:
-        message_parts.append(f"⚠️ *Atenção:* Cada link só pode ser usado *uma vez* e expira em breve\\.\n\n")
+        # Construção segura: formatação em volta de texto escapado
+        attention_text = escape_markdown("Cada link só pode ser usado ", version=2)
+        attention_text_end = escape_markdown(" e expira em breve.", version=2)
+        message_parts.append(f"⚠️ *Atenção:* {attention_text}*uma vez*{attention_text_end}\n\n")
 
-        # Mensagem de aviso com todos os caracteres especiais escapados manualmente
-        warning_message = (
-            "\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\\-\n"
-            "⚠️ *Aviso importante:*\n"
-            "O Telegram pode bloquear temporariamente novas entradas se você tentar acessar "
-            "muitos grupos ou canais em pouco tempo \\— é uma medida automática de segurança contra spam\\.\n\n"
-            "👉 Para evitar isso, *entre em até 3 canais por vez*, aguarde cerca de 30 minutos "
-            "e depois continue com os demais\\.\n\n"
-            "Se algum link estiver expirado, use o comando /suporte para solicitar novos links\\."
+        # Construção segura para o aviso complexo
+        warning_line = escape_markdown("------------------------------------\n", version=2)
+        warning_header = "*Aviso importante:*\n"
+        warning_body1 = escape_markdown("O Telegram pode bloquear temporariamente novas entradas se você tentar acessar muitos grupos ou canais em pouco tempo — é uma medida automática de segurança contra spam.\n\n", version=2)
+        warning_body2_part1 = escape_markdown("👉 Para evitar isso, ", version=2)
+        warning_body2_part2 = escape_markdown(", aguarde cerca de 30 minutos e depois continue com os demais.\n\n", version=2)
+        warning_body3 = escape_markdown("Se algum link estiver expirado, use o comando /suporte para solicitar novos links.", version=2)
+
+        full_warning = (
+            f"{warning_line}"
+            f"⚠️ {warning_header}"
+            f"{warning_body1}"
+            f"{warning_body2_part1}*entre em até 3 canais por vez*{warning_body2_part2}"
+            f"{warning_body3}"
         )
-        message_parts.append(warning_message)
+        message_parts.append(full_warning)
 
     if new_links_generated == 0 and access_type == 'support':
-        message_parts.append("\nParece que você já está em todos os nossos grupos\\! Nenhum link novo foi necessário\\.")
+        support_footer = "\nParece que você já está em todos os nossos grupos! Nenhum link novo foi necessário."
+        message_parts.append(escape_markdown(support_footer, version=2))
 
     if failed_links > 0:
-        message_parts.append(f"\n\n❌ Não foi possível gerar links para {failed_links} grupo\\(s\\)\\. Por favor, contate o suporte se precisar\\.")
+        failed_footer = f"\n\n❌ Não foi possível gerar links para {failed_links} grupo(s). Por favor, contate o suporte se precisar."
+        message_parts.append(escape_markdown(failed_footer, version=2))
 
     final_message = "".join(message_parts)
 
@@ -142,7 +156,6 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
         await bot.send_message(chat_id=user_id, text=final_message, parse_mode=ParseMode.MARKDOWN_V2, disable_web_page_preview=True)
         logger.info(f"✅ [JOB][{payment_id}] Mensagem com formatação enviada com sucesso para o usuário {user_id}.")
     except BadRequest as e:
-        logger.error(f"Falha CRÍTICA ao enviar mensagem final para {user_id} com MARKDOWN_V2: {e}. Enviando como texto plano.")
-        # Fallback melhorado: remove formatação E os caracteres de escape
+        logger.critical(f"Falha INESPERADA ao enviar msg formatada para {user_id}: {e}. Mensagem: {final_message}")
         plain_text = final_message.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
         await bot.send_message(chat_id=user_id, text=plain_text, disable_web_page_preview=True)
