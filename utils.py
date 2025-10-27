@@ -7,6 +7,8 @@ from datetime import datetime, timezone, timedelta
 from telegram import Bot
 from telegram.ext import Application
 from telegram.constants import ParseMode
+from telegram.error import Forbidden, BadRequest
+from telegram.helpers import escape_markdown
 
 import db_supabase as db
 
@@ -41,6 +43,8 @@ def format_date_br(dt: datetime | str | None) -> str:
     return dt.astimezone(TIMEZONE_BR).strftime('%d/%m/%Y às %H:%M')
 
 
+# utils.py -- Substitua a função send_access_links inteira
+
 async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type: str = 'purchase'):
     """
     Gera e envia links de acesso, com mensagens personalizadas.
@@ -65,7 +69,9 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
             member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
             if member.status in ['member', 'administrator', 'creator']:
                 chat = await bot.get_chat(chat_id)
-                groups_already_in_text += f"✅ Você já é membro do grupo: *{chat.title}*\n\n"
+                # --- CORREÇÃO APLICADA AQUI ---
+                escaped_title = escape_markdown(chat.title, version=2)
+                groups_already_in_text += f"✅ Você já é membro do grupo: *{escaped_title}*\n\n"
                 continue
 
             link = await bot.create_chat_invite_link(
@@ -74,8 +80,10 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
                 member_limit=1
             )
             chat = await bot.get_chat(chat_id)
+            # --- CORREÇÃO APLICADA AQUI ---
             group_title = chat.title or f"Grupo {group_ids.index(chat_id) + 1}"
-            links_to_send_text += f"🔗 *{group_title}:* {link.invite_link}\n\n"
+            escaped_title = escape_markdown(group_title, version=2)
+            links_to_send_text += f"🔗 *{escaped_title}:* {link.invite_link}\n\n"
             new_links_generated += 1
 
         except Exception as e:
@@ -83,8 +91,10 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
                 try:
                     link = await bot.create_chat_invite_link(chat_id=chat_id, expire_date=expire_date, member_limit=1)
                     chat = await bot.get_chat(chat_id)
+                    # --- CORREÇÃO APLICADA AQUI ---
                     group_title = chat.title or f"Grupo {group_ids.index(chat_id) + 1}"
-                    links_to_send_text += f"🔗 *{group_title}:* {link.invite_link}\n\n"
+                    escaped_title = escape_markdown(group_title, version=2)
+                    links_to_send_text += f"🔗 *{escaped_title}:* {link.invite_link}\n\n"
                     new_links_generated += 1
                 except Exception as inner_e:
                      logger.error(f"[JOB][{payment_id}] Erro interno ao criar link para o grupo {chat_id}: {inner_e}")
@@ -94,6 +104,8 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
                 failed_links += 1
 
         await asyncio.sleep(0.2)
+
+    # ... (o resto da função continua o mesmo, mas vamos corrigir o parse_mode no final)
 
     final_message = ""
     if access_type == 'trial':
@@ -110,18 +122,18 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
         final_message += groups_already_in_text
 
     if new_links_generated > 0:
-        final_message += "⚠️ **Atenção:** Cada link só pode ser usado **uma vez** e expira em breve.\n\n"
+        final_message += f"⚠️ *Atenção:* Cada link só pode ser usado *uma vez* e expira em breve.\n\n"
 
         warning_message = (
             "------------------------------------\n"
-            "⚠️ **Aviso importante:**\n"
+            "⚠️ *Aviso importante:*\n"
             "O Telegram pode bloquear temporariamente novas entradas se você tentar acessar "
             "muitos grupos ou canais em pouco tempo — é uma medida automática de segurança contra spam.\n\n"
-            "👉 Para evitar isso, **entre em até 3 canais por vez**, aguarde cerca de 30 minutos "
+            "👉 Para evitar isso, *entre em até 3 canais por vez*, aguarde cerca de 30 minutos "
             "e depois continue com os demais.\n\n"
             "Se algum link estiver expirado, use o comando /suporte para solicitar novos links."
         )
-        final_message += warning_message
+        final_message += escape_markdown(warning_message, version=2)
 
     if new_links_generated == 0 and access_type == 'support':
         final_message += "\nParece que você já está em todos os nossos grupos! Nenhum link novo foi necessário."
@@ -129,5 +141,6 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
     if failed_links > 0:
         final_message += f"\n\n❌ Não foi possível gerar links para {failed_links} grupo(s). Por favor, contate o suporte se precisar."
 
-    await bot.send_message(chat_id=user_id, text=final_message, parse_mode=ParseMode.MARKDOWN)
+    # --- CORREÇÃO FINAL APLICADA AQUI ---
+    await bot.send_message(chat_id=user_id, text=final_message, parse_mode=ParseMode.MARKDOWN_V2)
     logger.info(f"✅ [JOB][{payment_id}] Tarefa de links para o usuário {user_id} concluída. Gerados: {new_links_generated}, Já membro: {len(group_ids) - new_links_generated - failed_links}, Falhas: {failed_links}")
