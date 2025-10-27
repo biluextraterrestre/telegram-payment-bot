@@ -802,7 +802,7 @@ async def send_first_reminder(context: ContextTypes.DEFAULT_TYPE):
     "Olá! 👋\n\n"
     "Percebi que você deu uma olhadinha nos nossos canais VIP com a degustação gratuita de 30 minutos... e que tal transformar esses 30 minutos em *prazer ilimitado*? 😏\n\n"
     "Você já sentiu o gostinho do que temos: *ANAL PROFISSIONAL*, *VIP BRASIL*, *TRANS*, *MILFs*, *vazados quentes* e muito mais... agora imagine isso *todo dia*, com atualizações frescas e acesso total!\n\n"
-    "Não deixe o desejo passar... garanta já seu acesso definitivo com pagamento seguro via PIX e privacidade total. Toque em /start e escolha seu plano!"
+    "Não deixe o desejo passar... garanta já seu acesso definitivo com pagamento seguro via PIX e privacidade total. Escolha seu plano!"
     )
     keyboard = [
         [InlineKeyboardButton(f"✅ Assinatura Mensal (R$ {product_monthly['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_MONTHLY}')],
@@ -833,7 +833,7 @@ async def send_third_reminder(context: ContextTypes.DEFAULT_TYPE):
 
     text = (
     "Última chance, amigo! 🔥\n\n"
-    "Sua degustação está quase acabando... e com ela, o acesso aos canais mais *quentes* da internet: brasileiras famosas, cenas reais de amadores, hentai sem censura, Caroline Zalog em ação e muito mais!\n\n"
+    "Agora que sua degustação acabou... e com ela, o acesso aos canais mais *quentes* da internet: brasileiras famosas, cenas reais de amadores, hentai sem censura, Caroline Zalog em ação e muito mais!\n\n"
     "Não fique só na vontade. Clique em /start agora, escolha seu plano (mensal ou vitalício) e mergulhe de vez no prazer que você já provou que ama. "
     "O próximo vídeo *explosivo* está te esperando! 💦"
     )

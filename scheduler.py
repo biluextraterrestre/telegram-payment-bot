@@ -10,6 +10,13 @@ from supabase import create_client, Client
 from telegram import Bot
 from telegram.error import BadRequest, Forbidden, RetryAfter
 
+import db_supabase as db
+
+# --- CONSTANTES DE PRODUTO ---
+TRIAL_PRODUCT_ID = int(os.getenv("TRIAL_PRODUCT_ID", 3))
+PRODUCT_ID_MONTHLY = int(os.getenv("PRODUCT_ID_MONTHLY", 0))
+PRODUCT_ID_LIFETIME = int(os.getenv("PRODUCT_ID_LIFETIME", 0))
+
 # --- CONFIGURAÇÃO ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', stream=sys.stdout)
 logger = logging.getLogger("Scheduler")
@@ -110,9 +117,10 @@ async def find_and_process_expired_subscriptions(supabase: Client, bot: Bot):
     try:
         now_iso = datetime.now(TIMEZONE_BR).isoformat()
 
+        # Modificamos a consulta para trazer também o product_id
         expired_response = await asyncio.to_thread(
             lambda: supabase.table('subscriptions')
-            .select('id, user:users(telegram_user_id)')
+            .select('id, product_id, user:users(telegram_user_id)')
             .eq('status', 'active')
             .lt('end_date', now_iso)
             .execute()
@@ -127,22 +135,50 @@ async def find_and_process_expired_subscriptions(supabase: Client, bot: Bot):
         for sub in expired_response.data:
             user_id = sub.get('user', {}).get('telegram_user_id')
             sub_id = sub.get('id')
+            product_id = sub.get('product_id')
 
-            if not user_id: continue
+            if not user_id:
+                continue
 
             logger.info(f"Processando expiração para o usuário {user_id} (assinatura {sub_id}).")
 
+            # A remoção dos grupos é a mesma para todos
             removed_count = await kick_user_from_all_groups(user_id, bot)
 
+            # Marca a assinatura como 'expired' no banco de dados
             await asyncio.to_thread(
                 lambda: supabase.table('subscriptions').update({'status': 'expired'}).eq('id', sub_id).execute()
             )
             logger.info(f"Assinatura {sub_id} do usuário {user_id} marcada como 'expired'. Removido de {removed_count} grupos.")
+
+            # --- LÓGICA CONDICIONAL PARA A MENSAGEM ---
             try:
-                await bot.send_message(chat_id=user_id, text="Sua assinatura expirou e seu acesso aos grupos foi removido. Para voltar, use o comando /renovar.")
+                if product_id == TRIAL_PRODUCT_ID:
+                    # Mensagem personalizada para o fim da degustação
+                    product_monthly = await db.get_product_by_id(PRODUCT_ID_MONTHLY)
+                    product_lifetime = await db.get_product_by_id(PRODUCT_ID_LIFETIME)
+
+                    text = (
+                        "Seu período de degustação de 30 minutos acabou! ✨\n\n"
+                        "Gostou do que viu? Garanta seu acesso permanente e não perca nenhuma novidade. "
+                        "Escolha um de nossos planos abaixo para continuar na comunidade:"
+                    )
+                    keyboard = [
+                        [InlineKeyboardButton(f"✅ Assinatura Mensal (R$ {product_monthly['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_MONTHLY}')],
+                        [InlineKeyboardButton(f"💎 Acesso Vitalício (R$ {product_lifetime['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_LIFETIME}')]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    await bot.send_message(chat_id=user_id, text=text, reply_markup=reply_markup)
+                else:
+                    # Mensagem padrão para assinaturas pagas
+                    text = "Sua assinatura expirou e seu acesso aos grupos foi removido. Para voltar, use o comando /renovar."
+                    await bot.send_message(chat_id=user_id, text=text)
             except (Forbidden, BadRequest):
-                pass
+                logger.warning(f"Não foi possível notificar o usuário {user_id} sobre a expiração (bloqueou o bot?).")
+            except Exception as e:
+                logger.error(f"Erro ao enviar mensagem de expiração para {user_id}: {e}")
+            # --- FIM DA LÓGICA CONDICIONAL ---
+
     except Exception as e:
         logger.error(f"Erro CRÍTICO no processo de expiração: {e}", exc_info=True)
-
 
