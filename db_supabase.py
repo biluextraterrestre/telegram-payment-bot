@@ -672,12 +672,19 @@ async def get_system_stats() -> Dict[str, Any]:
             'total_users': 0, 'total_groups': 0, 'active_coupons': 0,
             'active_subscriptions': 0, 'pending_subscriptions': 0, 'expired_subscriptions': 0,
             'total_revenue': 0.0, 'monthly_revenue': 0.0, 'daily_revenue': 0.0,
-            'conversion_rate': 0.0
+            'conversion_rate': 0.0, 'total_trials_used': 0
         }
 
         # Contagens de usuários, grupos, cupons
         users_resp = await asyncio.to_thread(lambda: supabase.table('users').select('id', count='exact').execute())
         stats['total_users'] = users_resp.count or 0
+
+        # --- NOVA CONSULTA PARA DEGUSTAÇÕES ---
+        trials_resp = await asyncio.to_thread(
+            lambda: supabase.table('users').select('id', count='exact').eq('has_used_trial', True).execute()
+        )
+        stats['total_trials_used'] = trials_resp.count or 0
+        # --- FIM DA NOVA CONSULTA ---
 
         groups_resp = await asyncio.to_thread(lambda: supabase.table('groups').select('id', count='exact').execute())
         stats['total_groups'] = groups_resp.count or 0

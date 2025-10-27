@@ -148,6 +148,7 @@ async def view_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         text = (
             "📊 *Estatísticas do Sistema*\n\n"
             f"👥 *Usuários Totais:* {stats.get('total_users', 0)}\n"
+            f"🎁 *Degustações Utilizadas:* {stats.get('total_trials_used', 0)}\n\n"
             f"✅ *Assinaturas Ativas:* {stats.get('active_subscriptions', 0)}\n"
             f"⏳ *Assinaturas Pendentes:* {stats.get('pending_subscriptions', 0)}\n"
             f"❌ *Assinaturas Expiradas:* {stats.get('expired_subscriptions', 0)}\n\n"

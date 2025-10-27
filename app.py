@@ -557,6 +557,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text("Verificando sua elegibilidade para a degustação...")
 
         db_user = await db.get_or_create_user(tg_user)
+        # Verifica se o usuário já tem uma assinatura ativa antes de iniciar o trial
+        active_sub = await db.get_user_active_subscription(tg_user.id)
+        if active_sub:
+            await query.edit_message_text("Você já possui uma assinatura ativa! Não é necessário iniciar a degustação.")
+            return
+
         can_start_trial = await db.check_and_set_trial_used(db_user['id'])
 
         if can_start_trial:
@@ -569,6 +575,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     chat_id=chat_id,
                     text="⚠️ **Atenção:** Seu acesso de degustação expira em 30 minutos! Após esse período, você será removido(a) automaticamente dos grupos."
                 )
+
+                # --- AGENDAMENTO DOS LEMBRETES ---
+                job_queue = context.application.job_queue
+
+                # Horários a partir do FIM da degustação (30 minutos a partir de agora)
+                # 1. Primeiro lembrete: 3 horas após o fim do trial (3h 30m a partir de agora)
+                job_queue.run_once(send_first_reminder, when=timedelta(hours=3, minutes=30), user_id=tg_user.id, name=f"reminder1_{tg_user.id}")
+
+                # 2. Segundo lembrete: 5 horas após o fim do trial (5h 30m a partir de agora)
+                job_queue.run_once(send_second_reminder, when=timedelta(hours=5, minutes=30), user_id=tg_user.id, name=f"reminder2_{tg_user.id}")
+
+                # 3. Terceiro lembrete: 7 horas após o fim do trial (7h 30m a partir de agora)
+                job_queue.run_once(send_third_reminder, when=timedelta(hours=7, minutes=30), user_id=tg_user.id, name=f"reminder3_{tg_user.id}")
+
+                logger.info(f"Lembretes de remarketing agendados para o usuário {tg_user.id}.")
+                # --- FIM DO AGENDAMENTO ---
             else:
                 await query.edit_message_text("❌ Ocorreu um erro ao gerar seu acesso. Por favor, contate o suporte.")
 
@@ -713,6 +735,16 @@ async def process_approved_payment(payment_id: str):
     # Envia links de acesso para o usuário que pagou
     telegram_user_id = activated_subscription.get('user', {}).get('telegram_user_id')
     if telegram_user_id:
+
+        # --- CANCELAMENTO DOS LEMBRETES ---
+        job_queue = bot_app.job_queue
+        for i in range(1, 4):
+            jobs = job_queue.get_jobs_by_name(f"reminder{i}_{telegram_user_id}")
+            for job in jobs:
+                job.schedule_removal()
+                logger.info(f"Removendo job de lembrete '{job.name}' para o usuário {telegram_user_id} que acabou de pagar.")
+        # --- FIM DO CANCELAMENTO ---
+
         logger.info(f"[{payment_id}] Assinatura ativada. Agendando envio de links para o usuário {telegram_user_id}.")
         asyncio.create_task(send_access_links(bot_app.bot, telegram_user_id, payment_id))
     else:
@@ -752,6 +784,61 @@ async def process_approved_payment(payment_id: str):
                 logger.info(f"[{payment_id}] Notificação de recompensa enviada com sucesso para o usuário {referrer_tg_id}.")
         except Exception as e:
             logger.error(f"[{payment_id}] Falha CRÍTICA ao processar recompensa de indicação: {e}", exc_info=True)
+
+# Remarketing pós-degustação
+async def send_first_reminder(context: ContextTypes.DEFAULT_TYPE):
+    """Envia o primeiro lembrete 3 horas após o fim da degustação."""
+    user_id = context.job.user_id
+    logger.info(f"Enviando primeiro lembrete pós-trial para o usuário {user_id}.")
+
+    # Busca os produtos para criar os botões
+    product_monthly = await db.get_product_by_id(PRODUCT_ID_MONTHLY)
+    product_lifetime = await db.get_product_by_id(PRODUCT_ID_LIFETIME)
+    if not product_monthly or not product_lifetime:
+        logger.error(f"Não foi possível enviar lembrete para {user_id}: produtos não encontrados.")
+        return
+
+    text = (
+        "Olá! 👋\n\n"
+        "Percebi que você deu uma olhada em nossos grupos com o acesso de degustação, mas ainda não garantiu seu acesso definitivo. "
+        "Não perca a chance de fazer parte da nossa comunidade! Escolha seu plano abaixo:"
+    )
+    keyboard = [
+        [InlineKeyboardButton(f"✅ Assinatura Mensal (R$ {product_monthly['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_MONTHLY}')],
+        [InlineKeyboardButton(f"💎 Acesso Vitalício (R$ {product_lifetime['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_LIFETIME}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    try:
+        await context.bot.send_message(chat_id=user_id, text=text, reply_markup=reply_markup)
+    except Exception as e:
+        logger.warning(f"Não foi possível enviar o primeiro lembrete para {user_id}: {e}")
+
+async def send_second_reminder(context: ContextTypes.DEFAULT_TYPE):
+    """Envia o segundo lembrete 5 horas após o fim da degustação."""
+    user_id = context.job.user_id
+    logger.info(f"Enviando segundo lembrete pós-trial para o usuário {user_id}.")
+
+    text = "Ainda está por aqui? 🤔 Lembre-se que com o acesso completo, você não perde nenhuma novidade e interage com todos os membros. A oportunidade está a um clique de distância!"
+    try:
+        await context.bot.send_message(chat_id=user_id, text=text)
+    except Exception as e:
+        logger.warning(f"Não foi possível enviar o segundo lembrete para {user_id}: {e}")
+
+async def send_third_reminder(context: ContextTypes.DEFAULT_TYPE):
+    """Envia o terceiro e último lembrete 7 horas após o fim da degustação."""
+    user_id = context.job.user_id
+    logger.info(f"Enviando terceiro lembrete pós-trial para o usuário {user_id}.")
+
+    text = (
+        "Esta é sua última chamada para a ação! 🚀\n\n"
+        "Garantir seu acesso é investir em conhecimento e networking. Clique em /start e escolha o plano que vai transformar sua jornada!"
+    )
+    try:
+        await context.bot.send_message(chat_id=user_id, text=text)
+    except Exception as e:
+        logger.warning(f"Não foi possível enviar o terceiro lembrete para {user_id}: {e}")
+
 
 # --- WEBHOOKS E CICLO DE VIDA ---
 
