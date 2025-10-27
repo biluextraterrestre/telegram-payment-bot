@@ -101,9 +101,11 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, is_support_
 
     # --- LÓGICA DE MENSAGEM FINAL APRIMORADA ---
     final_message = ""
-    if is_support_request:
+    if access_type == 'trial':
+        final_message += "🎁 Seu acesso de degustação está liberado!\n\nExplore nossos grupos pelos próximos 30 minutos. Aqui estão seus links de acesso:\n\n"
+    elif access_type == 'support':
         final_message += "Aqui está o status dos seus links de acesso:\n\n"
-    else:
+    else: # 'purchase'
         final_message += "🎉 Pagamento confirmado!\n\nSeja bem-vindo(a)! Aqui estão seus links de acesso:\n\n"
 
     if links_to_send_text:
@@ -113,10 +115,9 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, is_support_
         final_message += groups_already_in_text
 
     if new_links_generated > 0:
-        final_message += "⚠️ **Atenção:** Cada link só pode ser usado **uma vez** e expira em breve.\n\n" # Adicionado \n\n para espaçamento
+        final_message += "⚠️ **Atenção:** Cada link só pode ser usado **uma vez** e expira em breve.\n\n"
 
-    # --- ### NOVA MENSAGEM DE AVISO ADICIONADA AQUI ### ---
-    if new_links_generated > 0: # Mostra o aviso apenas se novos links foram gerados
+    if new_links_generated > 0:
         warning_message = (
             "------------------------------------\n"
             "⚠️ **Aviso importante:**\n"
@@ -127,15 +128,12 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, is_support_
             "Se algum link estiver expirado, use o comando /suporte para solicitar novos links."
         )
         final_message += warning_message
-    # --- ### FIM DA NOVA MENSAGEM ### ---
 
-
-    if new_links_generated == 0 and is_support_request:
+    if new_links_generated == 0 and access_type == 'support':
         final_message += "\nParece que você já está em todos os nossos grupos! Nenhum link novo foi necessário."
 
     if failed_links > 0:
         final_message += f"\n\n❌ Não foi possível gerar links para {failed_links} grupo(s). Por favor, contate o suporte se precisar."
 
     await bot.send_message(chat_id=user_id, text=final_message, parse_mode=ParseMode.MARKDOWN)
-
     logger.info(f"✅ [JOB][{payment_id}] Tarefa de links para o usuário {user_id} concluída. Gerados: {new_links_generated}, Já membro: {len(group_ids) - new_links_generated - failed_links}, Falhas: {failed_links}")

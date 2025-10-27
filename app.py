@@ -152,7 +152,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             if days_left <= 3:
                 message += "⚠️ *Sua assinatura está perto de vencer!*\nPara renovar, use o comando /renovar."
             else:
-                message += "Você tem acesso a todos os nossos grupos. Para renovar, use /renovar."
+                message += "Você tem acesso a todos os nossos canais. Para renovar, use /renovar."
         else:
             message = (
                 "📄 *Status do seu Acesso*\n\n"
@@ -570,7 +570,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             trial_sub = await db.create_trial_subscription(db_user['id'])
 
             if trial_sub:
-                await send_access_links(context.bot, tg_user.id, trial_sub['mp_payment_id'])
+                await send_access_links(context.bot, tg_user.id, trial_sub['mp_payment_id'], access_type='trial')
                 await context.bot.send_message(
                     chat_id=chat_id,
                     text="⚠️ **Atenção:** Seu acesso de degustação expira em 30 minutos! Após esse período, você será removido(a) automaticamente dos grupos."
