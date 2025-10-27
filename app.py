@@ -799,9 +799,10 @@ async def send_first_reminder(context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (
-        "Olá! 👋\n\n"
-        "Percebi que você deu uma olhada em nossos grupos com o acesso de degustação, mas ainda não garantiu seu acesso definitivo. "
-        "Não perca a chance de fazer parte da nossa comunidade! Escolha seu plano abaixo:"
+    "Olá! 👋\n\n"
+    "Percebi que você deu uma olhadinha nos nossos canais VIP com a degustação gratuita de 30 minutos... e que tal transformar esses 30 minutos em *prazer ilimitado*? 😏\n\n"
+    "Você já sentiu o gostinho do que temos: *ANAL PROFISSIONAL*, *VIP BRASIL*, *TRANS*, *MILFs*, *vazados quentes* e muito mais... agora imagine isso *todo dia*, com atualizações frescas e acesso total!\n\n"
+    "Não deixe o desejo passar... garanta já seu acesso definitivo com pagamento seguro via PIX e privacidade total. Toque em /start e escolha seu plano!"
     )
     keyboard = [
         [InlineKeyboardButton(f"✅ Assinatura Mensal (R$ {product_monthly['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_MONTHLY}')],
@@ -831,8 +832,10 @@ async def send_third_reminder(context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Enviando terceiro lembrete pós-trial para o usuário {user_id}.")
 
     text = (
-        "Esta é sua última chamada para a ação! 🚀\n\n"
-        "Garantir seu acesso é investir em conhecimento e networking. Clique em /start e escolha o plano que vai transformar sua jornada!"
+    "Última chance, amigo! 🔥\n\n"
+    "Sua degustação está quase acabando... e com ela, o acesso aos canais mais *quentes* da internet: brasileiras famosas, cenas reais de amadores, hentai sem censura, Caroline Zalog em ação e muito mais!\n\n"
+    "Não fique só na vontade. Clique em /start agora, escolha seu plano (mensal ou vitalício) e mergulhe de vez no prazer que você já provou que ama. "
+    "O próximo vídeo *explosivo* está te esperando! 💦"
     )
     try:
         await context.bot.send_message(chat_id=user_id, text=text)
