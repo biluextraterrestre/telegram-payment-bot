@@ -789,7 +789,7 @@ async def create_trial_subscription(db_user_id: int) -> dict | None:
 
         insert_data = {
             "user_id": db_user_id,
-            "product_id": TRIAL_PRODUCT_ID,
+            "product_id": TRIAL_PRODUCT_ID, # Garanta que esta constante está definida no seu arquivo
             "mp_payment_id": trial_notes,
             "status": "active",
             "start_date": start_date.isoformat(),
@@ -797,12 +797,24 @@ async def create_trial_subscription(db_user_id: int) -> dict | None:
             "final_price": 0.00,
         }
 
-        response = await asyncio.to_thread(
-            lambda: supabase.table('subscriptions').insert(insert_data).select('*').single().execute()
+        # --- CORREÇÃO APLICADA ---
+        # 1. Apenas executa a inserção. A biblioteca já retorna os dados por padrão.
+        insert_response = await asyncio.to_thread(
+            lambda: supabase.table('subscriptions').insert(insert_data).execute()
         )
 
+        # 2. Verifica se a inserção foi bem-sucedida e se retornou dados
+        if not insert_response or not insert_response.data:
+            logger.error(f"❌ [DB] Falha ao inserir a assinatura de trial para o usuário {db_user_id}. Nenhum dado retornado.")
+            return None
+
+        # 3. Pega o registro criado a partir da resposta
+        created_subscription = insert_response.data[0]
+        # --- FIM DA CORREÇÃO ---
+
         await create_log('trial_started', f"Trial de 30 min iniciado para o usuário {db_user_id}.")
-        return response.data
+        return created_subscription
+
     except Exception as e:
         logger.error(f"❌ [DB] Erro ao criar assinatura de trial: {e}", exc_info=True)
         return None
