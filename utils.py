@@ -43,6 +43,15 @@ def format_date_br(dt: datetime | str | None) -> str:
     return dt.astimezone(TIMEZONE_BR).strftime('%d/%m/%Y às %H:%M')
 
 
+def escape_url(url: str) -> str:
+    """
+    Escapa caracteres especiais em URLs para Markdown V2, exceto aqueles que fazem parte da URL.
+    No Markdown V2, URLs não precisam escapar caracteres especiais se estiverem em formato de link inline.
+    """
+    # Para URLs, não escapamos nada - o Telegram lida com elas automaticamente
+    return url
+
+
 async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type: str = 'purchase'):
     """
     Gera e envia links de acesso, com mensagens personalizadas.
@@ -68,7 +77,6 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
             member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
             if member.status in ['member', 'administrator', 'creator']:
                 chat = await bot.get_chat(chat_id)
-                # Esta parte já estava correta: escapa o título e DEPOIS aplica o negrito
                 escaped_title = escape_markdown(chat.title or f"Grupo {chat_id}", version=2)
                 groups_already_in_text += f"✅ Você já é membro do grupo: *{escaped_title}*\n\n"
                 continue
@@ -91,6 +99,7 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
             chat = await bot.get_chat(chat_id)
             group_title = chat.title or f"Grupo {group_ids.index(chat_id) + 1}"
             escaped_title = escape_markdown(group_title, version=2)
+            # CORREÇÃO: URL não deve ser escapada, mantém-se pura
             links_to_send_text += f"🔗 *{escaped_title}:* {link.invite_link}\n\n"
             new_links_generated += 1
         except Exception as e:
@@ -100,7 +109,7 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
         await asyncio.sleep(0.2)
 
 
-    # --- CORREÇÃO ROBUSTA: Construindo a mensagem de forma segura ---
+    # --- CONSTRUÇÃO ROBUSTA DA MENSAGEM ---
     message_parts = []
 
     if access_type == 'trial':
@@ -108,11 +117,12 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
         message_parts.append(escape_markdown(header, version=2))
     elif access_type == 'support':
         header = "Aqui estão o status e os novos links de acesso, se necessário:\n\n"
-        message_parts.append(header) # Este texto não tem caracteres especiais
+        message_parts.append(escape_markdown(header, version=2))
     else: # 'purchase'
         header = "🎉 Pagamento confirmado!\n\nSeja bem-vindo(a)! Aqui estão seus links de acesso:\n\n"
         message_parts.append(escape_markdown(header, version=2))
 
+    # Links já escapados corretamente (título escapado, URL pura)
     if links_to_send_text:
         message_parts.append(links_to_send_text)
 
@@ -120,12 +130,10 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
         message_parts.append(groups_already_in_text)
 
     if new_links_generated > 0:
-        # Construção segura: formatação em volta de texto escapado
         attention_text = escape_markdown("Cada link só pode ser usado ", version=2)
         attention_text_end = escape_markdown(" e expira em breve.", version=2)
         message_parts.append(f"⚠️ *Atenção:* {attention_text}*uma vez*{attention_text_end}\n\n")
 
-        # Construção segura para o aviso complexo
         warning_line = escape_markdown("------------------------------------\n", version=2)
         warning_header = "*Aviso importante:*\n"
         warning_body1 = escape_markdown("O Telegram pode bloquear temporariamente novas entradas se você tentar acessar muitos grupos ou canais em pouco tempo — é uma medida automática de segurança contra spam.\n\n", version=2)
@@ -143,7 +151,7 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
         message_parts.append(full_warning)
 
     if new_links_generated == 0 and access_type == 'support':
-        support_footer = "\nParece que você já está em todos os nossos grupos! Nenhum link novo foi necessário."
+        support_footer = "\n\nParece que você já está em todos os nossos grupos! Nenhum link novo foi necessário."
         message_parts.append(escape_markdown(support_footer, version=2))
 
     if failed_links > 0:
