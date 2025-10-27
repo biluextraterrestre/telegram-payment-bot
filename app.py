@@ -552,7 +552,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         else:
             await query.edit_message_text(text="Desculpe, ocorreu um erro ao gerar sua cobrança. Tente novamente mais tarde ou use /suporte.")
 
-    # --- NOVA LÓGICA DE DEGUSTAÇÃO ---
+    # Fluxo de Degustação
     elif data == 'start_trial':
         await query.edit_message_text("Verificando sua elegibilidade para a degustação...")
 
@@ -571,11 +571,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 )
             else:
                 await query.edit_message_text("❌ Ocorreu um erro ao gerar seu acesso. Por favor, contate o suporte.")
+
+        # --- SEÇÃO MODIFICADA ---
         else:
-            await query.edit_message_text("❌ Você já utilizou seu período de degustação. Para continuar, por favor, escolha um de nossos planos.")
-            await asyncio.sleep(3)
-            # Reenvia as opções do /start para o usuário
-            await start(update, context)
+            # Se o usuário não é elegível, mostra a mensagem e os botões de plano diretamente.
+            product_monthly = await db.get_product_by_id(PRODUCT_ID_MONTHLY)
+            product_lifetime = await db.get_product_by_id(PRODUCT_ID_LIFETIME)
+
+            if not product_monthly or not product_lifetime:
+                await query.edit_message_text("❌ Você já usou a degustação. Tivemos um problema ao carregar os planos. Por favor, use /start novamente.")
+                return
+
+            keyboard = [
+                [InlineKeyboardButton(f"✅ Assinatura Mensal (R$ {product_monthly['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_MONTHLY}')],
+                [InlineKeyboardButton(f"💎 Acesso Vitalício (R$ {product_lifetime['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_LIFETIME}')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await query.edit_message_text(
+                text="❌ Você já utilizou seu período de degustação. Para continuar, por favor, escolha um de nossos planos:",
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        # --- FIM DA SEÇÃO MODIFICADA ---
 
     # Fluxo de Suporte
     elif data == 'support_resend_links':
