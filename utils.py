@@ -45,10 +45,12 @@ def format_date_br(dt: datetime | str | None) -> str:
 
 def escape_url(url: str) -> str:
     """
-    Escapa caracteres especiais em URLs para Markdown V2, exceto aqueles que fazem parte da URL.
-    No Markdown V2, URLs não precisam escapar caracteres especiais se estiverem em formato de link inline.
+    Escapa caracteres especiais em URLs para Markdown V2.
+    No Markdown V2, quando URLs são exibidas como texto puro, caracteres especiais precisam ser escapados.
     """
-    # Para URLs, não escapamos nada - o Telegram lida com elas automaticamente
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in special_chars:
+        url = url.replace(char, f'\\{char}')
     return url
 
 
@@ -99,8 +101,9 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
             chat = await bot.get_chat(chat_id)
             group_title = chat.title or f"Grupo {group_ids.index(chat_id) + 1}"
             escaped_title = escape_markdown(group_title, version=2)
-            # CORREÇÃO: URL não deve ser escapada, mantém-se pura
-            links_to_send_text += f"🔗 *{escaped_title}:* {link.invite_link}\n\n"
+            # CORREÇÃO: Usar formato de link inline do Markdown V2: [texto](url)
+            # Isso evita ter que escapar os pontos na URL
+            links_to_send_text += f"🔗 *{escaped_title}:* [Clique aqui]({link.invite_link})\n\n"
             new_links_generated += 1
         except Exception as e:
             logger.error(f"[JOB][{payment_id}] Erro ao criar link de convite para o grupo {chat_id}: {e}")
