@@ -7,7 +7,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from supabase import create_client, Client
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest, Forbidden, RetryAfter
 
 import db_supabase as db
