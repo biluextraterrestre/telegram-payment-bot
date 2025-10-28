@@ -573,7 +573,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await send_access_links(context.bot, tg_user.id, trial_sub['mp_payment_id'], access_type='trial')
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text="⚠️ *Atenção:* Seu acesso de degustação expira em 30 minutos! Após esse período, você será removido(a) automaticamente dos grupos."
+                    text="⚠️ *Atenção:* Seu acesso de degustação expira em 30 minutos! Após esse período, você será removido(a) automaticamente dos grupos.",
+                    parse_mode=ParseMode.MARKDOWN
                 )
 
                 # --- AGENDAMENTO DOS LEMBRETES ---
@@ -811,7 +812,7 @@ async def send_first_reminder(context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     try:
-        await context.bot.send_message(chat_id=user_id, text=text, reply_markup=reply_markup)
+        await context.bot.send_message(chat_id=user_id, text=text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
         logger.warning(f"Não foi possível enviar o primeiro lembrete para {user_id}: {e}")
 
@@ -820,7 +821,7 @@ async def send_second_reminder(context: ContextTypes.DEFAULT_TYPE):
     user_id = context.job.user_id
     logger.info(f"Enviando segundo lembrete pós-trial para o usuário {user_id}.")
 
-    text = "Ainda está por aqui? 🤔 Lembre-se que com o acesso completo, você não perde nenhuma novidade e interage com todos os membros. A oportunidade está a um clique de distância!"
+    text = "Ainda está por aqui? 🤔 Lembre-se que com o acesso completo, você não perde nenhuma novidade. A oportunidade está a um clique de distância!"
     try:
         await context.bot.send_message(chat_id=user_id, text=text)
     except Exception as e:
@@ -838,7 +839,7 @@ async def send_third_reminder(context: ContextTypes.DEFAULT_TYPE):
     "O próximo vídeo *explosivo* está te esperando! 💦"
     )
     try:
-        await context.bot.send_message(chat_id=user_id, text=text)
+        await context.bot.send_message(chat_id=user_id, text=text, parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
         logger.warning(f"Não foi possível enviar o terceiro lembrete para {user_id}: {e}")
 
