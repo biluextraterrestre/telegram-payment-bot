@@ -13,8 +13,8 @@ from datetime import datetime, timedelta, timezone
 
 from quart import Quart, request, abort
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatInviteLink, User as TelegramUser, BotCommand
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, JobQueue, ConversationHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatInviteLink, User as TelegramUser, BotCommand, ChatMemberUpdated
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, JobQueue, ConversationHandler, ChatMemberHandler
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, Forbidden
 from telegram.request import HTTPXRequest
@@ -844,6 +844,55 @@ async def send_third_reminder(context: ContextTypes.DEFAULT_TYPE):
         logger.warning(f"Não foi possível enviar o terceiro lembrete para {user_id}: {e}")
 
 
+async def on_chat_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler para verificar novos membros em tempo real."""
+    result = update.chat_member
+    if not result:
+        return
+
+    # Extrai as informações relevantes do evento
+    chat = result.chat
+    user = result.new_chat_member.user
+    new_status = result.new_chat_member.status
+    old_status = result.old_chat_member.status if result.old_chat_member else None
+
+    # Ignora eventos do próprio bot para evitar loops
+    if user.id == context.bot.id:
+        return
+
+    # O evento que nos interessa é quando um usuário ENTRA no grupo.
+    # Isso acontece quando o status antigo não era 'member' e o novo é.
+    if new_status == 'member' and old_status not in ['member', 'administrator', 'creator']:
+        logger.info(f"[GATEKEEPER] Usuário {user.id} entrou no grupo {chat.id} ('{chat.title}'). Verificando assinatura...")
+
+        # Verifica no banco de dados se o usuário tem uma assinatura ativa
+        subscription = await db.get_user_active_subscription(user.id)
+
+        if not subscription:
+            logger.warning(f"[GATEKEEPER] ACESSO NEGADO para {user.id} no grupo {chat.id}. Nenhuma assinatura ativa encontrada. Removendo...")
+            try:
+                # Remove o usuário do grupo
+                await context.bot.ban_chat_member(chat_id=chat.id, user_id=user.id)
+                # Desbane imediatamente para que ele possa assinar e entrar de novo no futuro
+                await context.bot.unban_chat_member(chat_id=chat.id, user_id=user.id)
+
+                # Opcional: Notifica o usuário sobre a remoção
+                try:
+                    await context.bot.send_message(
+                        chat_id=user.id,
+                        text=f"Olá! Vimos que você tentou entrar em um de nossos canais, mas não encontramos uma assinatura ativa para você. Para obter acesso, use o comando /start e escolha um de nossos planos."
+                    )
+                except (Forbidden, BadRequest):
+                    logger.info(f"[GATEKEEPER] Não foi possível notificar o usuário {user.id} sobre a remoção (bloqueou o bot).")
+
+            except Forbidden:
+                logger.error(f"[GATEKEEPER] CRÍTICO: Sem permissão para remover o usuário {user.id} do grupo {chat.id}. Verifique as permissões do bot no grupo.")
+            except Exception as e:
+                logger.error(f"[GATEKEEPER] Erro ao remover usuário {user.id} do grupo {chat.id}: {e}")
+        else:
+            logger.info(f"[GATEKEEPER] ACESSO PERMITIDO para {user.id} no grupo {chat.id}. Assinatura ativa encontrada.")
+
+
 # --- WEBHOOKS E CICLO DE VIDA ---
 
 # --- ESTADO PARA CONVERSATION HANDLER DE CUPOM DE USUÁRIO ---
@@ -864,6 +913,8 @@ cupom_handler = ConversationHandler(
 # 2. Adicione os handlers na ordem correta
 bot_app.add_handler(get_admin_conversation_handler())
 bot_app.add_handler(cupom_handler)
+
+bot_app.add_handler(ChatMemberHandler(on_chat_member_update, ChatMemberHandler.CHAT_MEMBER))
 
 # 3. Comandos regulares
 bot_app.add_handler(CommandHandler("start", start))
