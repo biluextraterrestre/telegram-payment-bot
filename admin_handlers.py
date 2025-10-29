@@ -42,7 +42,7 @@ states_list = [
     'GETTING_COUPON_VALIDITY', 'GETTING_COUPON_USAGE_LIMIT',
     'GETTING_GROUP_FORWARD', 'CONFIRMING_GROUP_ADD', 'GETTING_GROUP_TO_REMOVE',
     'CONFIRMING_GROUP_REMOVE', 'GETTING_COUPON_TO_DEACTIVATE', 'GETTING_COUPON_TO_REACTIVATE',
-    'VIEWING_LOGS', 'GETTING_TRANSACTION_SEARCH', 'MANAGING_REFERRALS', 'FILTERING_LOGS'
+    'VIEWING_LOGS', 'GETTING_TRANSACTION_SEARCH', 'MANAGING_REFERRALS', 'FILTERING_LOGS', 'CONFIRMING_AUDIT'
 ]
 (
     SELECTING_ACTION, GETTING_USER_ID_FOR_CHECK, GETTING_USER_ID_FOR_GRANT,
@@ -53,7 +53,7 @@ states_list = [
     GETTING_COUPON_VALIDITY, GETTING_COUPON_USAGE_LIMIT, GETTING_GROUP_FORWARD,
     CONFIRMING_GROUP_ADD, GETTING_GROUP_TO_REMOVE, CONFIRMING_GROUP_REMOVE,
     GETTING_COUPON_TO_DEACTIVATE, GETTING_COUPON_TO_REACTIVATE,
-    VIEWING_LOGS, GETTING_TRANSACTION_SEARCH, MANAGING_REFERRALS, FILTERING_LOGS
+    VIEWING_LOGS, GETTING_TRANSACTION_SEARCH, MANAGING_REFERRALS, FILTERING_LOGS, CONFIRMING_AUDIT
 ) = range(len(states_list))
 
 
@@ -98,6 +98,7 @@ async def show_main_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYP
             InlineKeyboardButton("🏢 Gerenciar Grupos", callback_data="admin_manage_groups"),
             InlineKeyboardButton("📝 Ver Logs", callback_data="admin_view_logs")
         ],
+        [InlineKeyboardButton("🛡️ Auditar Membros", callback_data="admin_audit")],
         [InlineKeyboardButton("✖️ Fechar Painel", callback_data="admin_cancel")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -321,6 +322,112 @@ async def logs_clear_filters(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Limpa todos os filtros e recarrega a visualização de logs."""
     context.user_data.pop('log_filters', None)
     return await view_logs(update, context)
+
+# --- SEÇÃO DE AUDITORIA DE MEMBROS ---
+
+@admin_only
+async def admin_audit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Inicia o fluxo de auditoria de membros, pedindo confirmação."""
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = [
+        [InlineKeyboardButton("✅ SIM, INICIAR AUDITORIA", callback_data="audit_confirm")],
+        [InlineKeyboardButton("❌ NÃO, CANCELAR", callback_data="admin_back_to_menu")]
+    ]
+    text = (
+        "🛡️ *Auditoria de Membros*\n\n"
+        "⚠️ *ATENÇÃO: AÇÃO DE ALTO IMPACTO*\n\n"
+        "Esta função irá verificar **todos os usuários que já interagiram com o bot** contra a lista de assinantes ativos.\n\n"
+        "Qualquer usuário encontrado nos grupos que **não possua uma assinatura ativa** será **REMOVIDO IMEDIATAMENTE**.\n\n"
+        "Este processo pode demorar vários minutos, dependendo do número de usuários e grupos. Você será notificado sobre o progresso.\n\n"
+        "Deseja continuar?"
+    )
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+    return CONFIRMING_AUDIT
+
+
+@admin_only
+async def admin_audit_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Confirma e inicia a tarefa de auditoria em segundo plano."""
+    query = update.callback_query
+    await query.answer()
+
+    await query.edit_message_text("✅ Auditoria iniciada. O processo está rodando em segundo plano. Aguarde as atualizações de progresso...")
+    await db.create_log('admin_action', f"Admin {update.effective_user.id} iniciou auditoria completa de membros.")
+
+    # Inicia a tarefa pesada em segundo plano para não bloquear o bot
+    asyncio.create_task(run_audit(context, query.message.chat_id, query.message.message_id))
+
+    return ConversationHandler.END # Termina a conversa para o admin poder usar outros comandos
+
+
+async def run_audit(context: ContextTypes.DEFAULT_TYPE, admin_chat_id: int, admin_message_id: int):
+    """Executa a lógica de auditoria, com feedback de progresso para o admin."""
+    logger.info("[AUDIT] Iniciando varredura completa de membros...")
+    start_time = datetime.now()
+    removed_count = 0
+    checked_count = 0
+    error_count = 0
+
+    try:
+        # 1. Pega a lista de permissões (assinantes ativos)
+        active_subscriber_ids = set(await db.get_all_active_tg_user_ids())
+        logger.info(f"[AUDIT] Encontrados {len(active_subscriber_ids)} assinantes ativos.")
+
+        # 2. Pega a lista de todos os usuários conhecidos
+        all_known_user_ids = await db.get_all_user_ids_from_db()
+        logger.info(f"[AUDIT] Verificando contra {len(all_known_user_ids)} usuários conhecidos.")
+
+        # 3. Determina quem precisa ser verificado/removido
+        users_to_check = [uid for uid in all_known_user_ids if uid not in active_subscriber_ids]
+        total_to_check = len(users_to_check)
+        logger.info(f"[AUDIT] {total_to_check} usuários sem assinatura ativa serão verificados.")
+
+        # 4. Itera e remove
+        for i, user_id in enumerate(users_to_check):
+            try:
+                # A função kick_user_from_all_groups já é perfeita para isso
+                # Ela retorna quantos grupos o usuário foi removido
+                kicked_from = await scheduler.kick_user_from_all_groups(user_id, context.bot)
+                if kicked_from > 0:
+                    removed_count += 1
+                    logger.info(f"[AUDIT] Usuário {user_id} removido de {kicked_from} grupo(s).")
+
+                checked_count += 1
+                await asyncio.sleep(0.2) # Delay para evitar rate limiting
+
+                # Atualiza o admin a cada 25 usuários verificados
+                if i > 0 and i % 25 == 0:
+                    progress_text = (
+                        f"🛡️ *Progresso da Auditoria...*\n\n"
+                        f"Verificados: {i}/{total_to_check}\n"
+                        f"Usuários Removidos: {removed_count}\n"
+                        f"Erros: {error_count}"
+                    )
+                    await context.bot.edit_message_text(text=progress_text, chat_id=admin_chat_id, message_id=admin_message_id, parse_mode=ParseMode.MARKDOWN)
+
+            except Exception as e_inner:
+                logger.error(f"[AUDIT] Erro ao processar o usuário {user_id} na varredura: {e_inner}")
+                error_count += 1
+                continue
+
+        # 5. Relatório final
+        elapsed_time = (datetime.now() - start_time).seconds
+        final_report = (
+            f"🛡️ *Auditoria Concluída!*\n\n"
+            f"✅ *Usuários verificados:* {checked_count}\n"
+            f"🚫 *Usuários removidos (encontrados em grupos):* {removed_count}\n"
+            f"❌ *Erros no processo:* {error_count}\n"
+            f"⏱️ *Duração total:* {elapsed_time // 60}m {elapsed_time % 60}s\n\n"
+            "O sistema agora está sincronizado."
+        )
+        await context.bot.edit_message_text(text=final_report, chat_id=admin_chat_id, message_id=admin_message_id, parse_mode=ParseMode.MARKDOWN)
+        await db.create_log('audit_complete', f"Auditoria concluída. {removed_count} usuários removidos.")
+
+    except Exception as e:
+        logger.critical(f"[AUDIT] Erro CRÍTICO durante a execução da auditoria: {e}", exc_info=True)
+        await context.bot.edit_message_text(text="❌ Erro crítico durante a auditoria. Verifique os logs do sistema.", chat_id=admin_chat_id, message_id=admin_message_id)
 
 # --- SEÇÃO DE GERENCIAMENTO DE GRUPOS COM LOGS DE DEBUG ---
 
@@ -1193,6 +1300,7 @@ def get_admin_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(manage_coupons_start, pattern="^admin_manage_coupons$"),
                 CallbackQueryHandler(manage_groups_start, pattern="^admin_manage_groups$"),
                 CallbackQueryHandler(view_logs, pattern="^admin_view_logs$"),
+                CallbackQueryHandler(admin_audit_start, pattern="^admin_audit$"),
                 CallbackQueryHandler(grant_new_group_start, pattern="^admin_grant_new_group$"),
                 CallbackQueryHandler(cancel, pattern="^admin_cancel$"),
             ],
@@ -1254,6 +1362,10 @@ def get_admin_conversation_handler() -> ConversationHandler:
             GETTING_COUPON_TO_REACTIVATE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, reactivate_coupon_execute),
                 CallbackQueryHandler(back_to_manage_coupons, pattern="^admin_manage_coupons$"),
+            ],
+            CONFIRMING_AUDIT: [
+                CallbackQueryHandler(admin_audit_confirm, pattern="^audit_confirm$"),
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
             ],
         },
         fallbacks=[

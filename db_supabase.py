@@ -825,3 +825,17 @@ async def create_trial_subscription(db_user_id: int) -> dict | None:
     except Exception as e:
         logger.error(f"❌ [DB] Erro ao criar assinatura de trial: {e}", exc_info=True)
         return None
+
+async def get_all_user_ids_from_db() -> list[int]:
+    """Retorna uma lista de todos os Telegram User IDs cadastrados na tabela 'users'."""
+    if not supabase: return []
+    try:
+        response = await asyncio.to_thread(
+            lambda: supabase.table('users').select('telegram_user_id').execute()
+        )
+        if not response.data: return []
+        return [item['telegram_user_id'] for item in response.data]
+    except Exception as e:
+        logger.error(f"❌ [DB] Erro ao buscar todos os IDs de usuário: {e}", exc_info=True)
+        return []
+
