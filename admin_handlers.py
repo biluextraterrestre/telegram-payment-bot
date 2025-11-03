@@ -456,12 +456,21 @@ async def _redraw_settings_menu(update: Update, context: ContextTypes.DEFAULT_TY
         [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")]
     ]
 
-    # Edita a mensagem com o menu atualizado
-    await query.edit_message_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode=ParseMode.MARKDOWN
-    )
+    # Edita a mensagem com o menu atualizado, com tratamento de erro
+    try:
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except BadRequest as e:
+        if "message is not modified" in str(e).lower():
+            # Se a mensagem já está nesse estado, apenas responde ao callback
+            await query.answer("✅ Configuração já está neste estado.")
+        else:
+            # Se for outro erro BadRequest, relança
+            raise
+
     return MANAGING_SETTINGS
 
 
@@ -480,7 +489,6 @@ async def settings_menu_start(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def settings_toggle_trial(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Ativa ou desativa a oferta de degustação e redesenha o menu."""
     query = update.callback_query
-    await query.answer("Processando...")
 
     action = query.data.split('_')[-1] # 'enable' ou 'disable'
     new_status = (action == 'enable')
@@ -490,10 +498,12 @@ async def settings_toggle_trial(update: Update, context: ContextTypes.DEFAULT_TY
     if success:
         status_text = "ativada" if new_status else "desativada"
         await db.create_log('admin_action', f"Admin {update.effective_user.id} {status_text} a oferta de degustação.")
+        await query.answer(f"✅ Degustação {status_text} com sucesso!")
+    else:
+        await query.answer("❌ Erro ao atualizar configuração.", show_alert=True)
 
     # Redesenha o menu com o novo estado
-    await _redraw_settings_menu(update, context)
-    return MANAGING_SETTINGS
+    return await _redraw_settings_menu(update, context)
 
 # --- SEÇÃO DE GERENCIAMENTO DE GRUPOS COM LOGS DE DEBUG ---
 
