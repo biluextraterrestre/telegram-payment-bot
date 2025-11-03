@@ -490,14 +490,10 @@ async def settings_toggle_trial(update: Update, context: ContextTypes.DEFAULT_TY
     if success:
         status_text = "ativada" if new_status else "desativada"
         await db.create_log('admin_action', f"Admin {update.effective_user.id} {status_text} a oferta de degustação.")
-        # Após a atualização bem-sucedida, chama a função para redesenhar o menu
-        # que buscará o novo estado diretamente do banco de dados.
-        return await _redraw_settings_menu(update, context)
-    else:
-        await query.edit_message_text("❌ Ocorreu um erro ao atualizar a configuração. Tente novamente.")
-        # Mesmo em caso de erro, redesenha o menu para mostrar o estado anterior consistente.
-        await asyncio.sleep(2)
-        return await _redraw_settings_menu(update, context)
+
+    # Redesenha o menu com o novo estado
+    await _redraw_settings_menu(update, context)
+    return MANAGING_SETTINGS
 
 # --- SEÇÃO DE GERENCIAMENTO DE GRUPOS COM LOGS DE DEBUG ---
 
