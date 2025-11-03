@@ -26,6 +26,34 @@ else:
     except Exception as e:
         logger.critical(f"Falha ao criar o cliente Supabase: {e}", exc_info=True)
 
+# --- FUNÇÕES DE CONFIGURAÇÕES (SETTINGS) ---
+
+async def get_setting(key: str) -> dict | None:
+    """Busca o valor de uma configuração específica."""
+    if not supabase: return None
+    try:
+        response = await asyncio.to_thread(
+            lambda: supabase.table('settings').select('value').eq('key', key).single().execute()
+        )
+        # O valor retornado estará dentro de um dicionário 'value'
+        return response.data.get('value') if response.data else None
+    except Exception as e:
+        logger.error(f"❌ [DB] Erro ao buscar configuração '{key}': {e}", exc_info=True)
+        return None
+
+async def update_setting(key: str, value: dict) -> bool:
+    """Atualiza o valor de uma configuração."""
+    if not supabase: return False
+    try:
+        await asyncio.to_thread(
+            lambda: supabase.table('settings').update({'value': value}).eq('key', key).execute()
+        )
+        logger.info(f"✅ [DB] Configuração '{key}' atualizada para {value}.")
+        return True
+    except Exception as e:
+        logger.error(f"❌ [DB] Erro ao atualizar configuração '{key}': {e}", exc_info=True)
+        return False
+
 # --- FUNÇÕES DE USUÁRIO ---
 
 async def get_or_create_user(tg_user: TelegramUser) -> dict | None:

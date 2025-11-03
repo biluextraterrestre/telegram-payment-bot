@@ -42,7 +42,7 @@ states_list = [
     'GETTING_COUPON_VALIDITY', 'GETTING_COUPON_USAGE_LIMIT',
     'GETTING_GROUP_FORWARD', 'CONFIRMING_GROUP_ADD', 'GETTING_GROUP_TO_REMOVE',
     'CONFIRMING_GROUP_REMOVE', 'GETTING_COUPON_TO_DEACTIVATE', 'GETTING_COUPON_TO_REACTIVATE',
-    'VIEWING_LOGS', 'GETTING_TRANSACTION_SEARCH', 'MANAGING_REFERRALS', 'FILTERING_LOGS', 'CONFIRMING_AUDIT'
+    'VIEWING_LOGS', 'GETTING_TRANSACTION_SEARCH', 'MANAGING_REFERRALS', 'FILTERING_LOGS', 'CONFIRMING_AUDIT', 'MANAGING_SETTINGS'
 ]
 (
     SELECTING_ACTION, GETTING_USER_ID_FOR_CHECK, GETTING_USER_ID_FOR_GRANT,
@@ -53,7 +53,7 @@ states_list = [
     GETTING_COUPON_VALIDITY, GETTING_COUPON_USAGE_LIMIT, GETTING_GROUP_FORWARD,
     CONFIRMING_GROUP_ADD, GETTING_GROUP_TO_REMOVE, CONFIRMING_GROUP_REMOVE,
     GETTING_COUPON_TO_DEACTIVATE, GETTING_COUPON_TO_REACTIVATE,
-    VIEWING_LOGS, GETTING_TRANSACTION_SEARCH, MANAGING_REFERRALS, FILTERING_LOGS, CONFIRMING_AUDIT
+    VIEWING_LOGS, GETTING_TRANSACTION_SEARCH, MANAGING_REFERRALS, FILTERING_LOGS, CONFIRMING_AUDIT, MANAGING_SETTINGS
 ) = range(len(states_list))
 
 
@@ -98,7 +98,10 @@ async def show_main_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYP
             InlineKeyboardButton("🏢 Gerenciar Grupos", callback_data="admin_manage_groups"),
             InlineKeyboardButton("📝 Ver Logs", callback_data="admin_view_logs")
         ],
-        [InlineKeyboardButton("🛡️ Auditar Membros", callback_data="admin_audit")],
+        [
+            InlineKeyboardButton("🛡️ Auditar Membros", callback_data="admin_audit"),
+            InlineKeyboardButton("⚙️ Configurações", callback_data="admin_settings")
+        ],
         [InlineKeyboardButton("✖️ Fechar Painel", callback_data="admin_cancel")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -428,6 +431,59 @@ async def run_audit(context: ContextTypes.DEFAULT_TYPE, admin_chat_id: int, admi
     except Exception as e:
         logger.critical(f"[AUDIT] Erro CRÍTICO durante a execução da auditoria: {e}", exc_info=True)
         await context.bot.edit_message_text(text="❌ Erro crítico durante a auditoria. Verifique os logs do sistema.", chat_id=admin_chat_id, message_id=admin_message_id)
+
+# --- SEÇÃO DE CONFIGURAÇÕES ---
+
+@admin_only
+async def settings_menu_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Mostra o menu de configurações do bot."""
+    query = update.callback_query
+    await query.answer()
+
+    await query.edit_message_text("⚙️ Carregando configurações...")
+
+    # Busca o status atual da degustação
+    trial_setting = await db.get_setting('trial_offer')
+    is_trial_enabled = trial_setting.get('enabled', False) if trial_setting else False
+
+    status_text = "✅ Ativada" if is_trial_enabled else "❌ Desativada"
+    button_text = "🔴 Desativar Degustação" if is_trial_enabled else "🟢 Ativar Degustação"
+    button_callback = "settings_trial_disable" if is_trial_enabled else "settings_trial_enable"
+
+    text = (
+        "⚙️ *Configurações Gerais*\n\n"
+        "Gerencie as funcionalidades do bot.\n\n"
+        f"🎁 *Oferta de Degustação:* {status_text}"
+    )
+    keyboard = [
+        [InlineKeyboardButton(button_text, callback_data=button_callback)],
+        [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")]
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+    return MANAGING_SETTINGS
+
+
+@admin_only
+async def settings_toggle_trial(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Ativa ou desativa a oferta de degustação."""
+    query = update.callback_query
+    await query.answer()
+
+    action = query.data.split('_')[-1] # 'enable' ou 'disable'
+    new_status = (action == 'enable')
+
+    success = await db.update_setting('trial_offer', {'enabled': new_status})
+
+    if success:
+        status_text = "ativada" if new_status else "desativada"
+        await query.edit_message_text(f"✅ A oferta de degustação foi **{status_text}** com sucesso!")
+        await db.create_log('admin_action', f"Admin {update.effective_user.id} {status_text} a oferta de degustação.")
+    else:
+        await query.edit_message_text("❌ Ocorreu um erro ao atualizar a configuração. Tente novamente.")
+
+    # Aguarda um pouco e volta para o menu de configurações atualizado
+    await asyncio.sleep(2)
+    return await settings_menu_start(update, context)
 
 # --- SEÇÃO DE GERENCIAMENTO DE GRUPOS COM LOGS DE DEBUG ---
 
@@ -1301,6 +1357,7 @@ def get_admin_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(manage_groups_start, pattern="^admin_manage_groups$"),
                 CallbackQueryHandler(view_logs, pattern="^admin_view_logs$"),
                 CallbackQueryHandler(admin_audit_start, pattern="^admin_audit$"),
+                CallbackQueryHandler(settings_menu_start, pattern="^admin_settings$"),
                 CallbackQueryHandler(grant_new_group_start, pattern="^admin_grant_new_group$"),
                 CallbackQueryHandler(cancel, pattern="^admin_cancel$"),
             ],
@@ -1365,6 +1422,10 @@ def get_admin_conversation_handler() -> ConversationHandler:
             ],
             CONFIRMING_AUDIT: [
                 CallbackQueryHandler(admin_audit_confirm, pattern="^audit_confirm$"),
+                CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
+            ],
+            MANAGING_SETTINGS: [
+                CallbackQueryHandler(settings_toggle_trial, pattern="^settings_trial_"),
                 CallbackQueryHandler(back_to_main_menu, pattern="^admin_back_to_menu$"),
             ],
         },

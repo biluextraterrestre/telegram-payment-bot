@@ -111,11 +111,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"*Escolha seu plano e mergulhe no prazer hoje mesmo! Se quiser, você pode experimentar nossos canais gratuitamente por 30 minutos.*"
     )
 
-    keyboard = [
-        [InlineKeyboardButton("🎁 Degustação Gratuita (30 min)", callback_data='start_trial')],
+    # --- LÓGICA MODIFICADA AQUI ---
+    keyboard = []
+
+    # Verifica se a degustação está habilitada no banco de dados
+    trial_setting = await db.get_setting('trial_offer')
+    if trial_setting and trial_setting.get('enabled', False):
+        keyboard.append([InlineKeyboardButton("🎁 Degustação Gratuita (30 min)", callback_data='start_trial')])
+
+    keyboard.extend([
         [InlineKeyboardButton(f"✅ Assinatura Mensal (R$ {product_monthly['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_MONTHLY}')],
         [InlineKeyboardButton(f"💎 Acesso Vitalício (R$ {product_lifetime['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_LIFETIME}')]
-    ]
+    ])
+    # --- FIM DA LÓGICA MODIFICADA ---
+
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
         text=follow_up_message,
@@ -554,6 +563,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Fluxo de Degustação
     elif data == 'start_trial':
+        # --- VERIFICAÇÃO ADICIONAL DE SEGURANÇA ---
+        trial_setting = await db.get_setting('trial_offer')
+        if not trial_setting or not trial_setting.get('enabled', False):
+            await query.answer("Desculpe, a oferta de degustação não está disponível no momento.", show_alert=True)
+            await query.edit_message_text("A oferta de degustação está temporariamente desativada. Por favor, escolha um de nossos planos pagos.")
+            return
+        # --- FIM DA VERIFICAÇÃO ---
+
         await query.edit_message_text("Verificando sua elegibilidade para a degustação...")
 
         db_user = await db.get_or_create_user(tg_user)
