@@ -434,15 +434,11 @@ async def run_audit(context: ContextTypes.DEFAULT_TYPE, admin_chat_id: int, admi
 
 # --- SEÇÃO DE CONFIGURAÇÕES ---
 
-@admin_only
-async def settings_menu_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Mostra o menu de configurações do bot."""
+async def _redraw_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Função interna para desenhar/redesenhar o menu de configurações."""
     query = update.callback_query
-    await query.answer()
 
-    await query.edit_message_text("⚙️ Carregando configurações...")
-
-    # Busca o status atual da degustação
+    # Busca o status MAIS RECENTE da degustação no banco de dados
     trial_setting = await db.get_setting('trial_offer')
     is_trial_enabled = trial_setting.get('enabled', False) if trial_setting else False
 
@@ -459,15 +455,32 @@ async def settings_menu_start(update: Update, context: ContextTypes.DEFAULT_TYPE
         [InlineKeyboardButton(button_text, callback_data=button_callback)],
         [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")]
     ]
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+
+    # Edita a mensagem com o menu atualizado
+    await query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode=ParseMode.MARKDOWN
+    )
     return MANAGING_SETTINGS
 
 
 @admin_only
-async def settings_toggle_trial(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Ativa ou desativa a oferta de degustação."""
+async def settings_menu_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Ponto de entrada para o menu de configurações."""
     query = update.callback_query
     await query.answer()
+    await query.edit_message_text("⚙️ Carregando configurações...")
+
+    # Chama a função de redesenhar para mostrar o estado atual
+    return await _redraw_settings_menu(update, context)
+
+
+@admin_only
+async def settings_toggle_trial(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Ativa ou desativa a oferta de degustação e redesenha o menu."""
+    query = update.callback_query
+    await query.answer("Processando...")
 
     action = query.data.split('_')[-1] # 'enable' ou 'disable'
     new_status = (action == 'enable')
@@ -476,14 +489,15 @@ async def settings_toggle_trial(update: Update, context: ContextTypes.DEFAULT_TY
 
     if success:
         status_text = "ativada" if new_status else "desativada"
-        await query.edit_message_text(f"✅ A oferta de degustação foi **{status_text}** com sucesso!")
         await db.create_log('admin_action', f"Admin {update.effective_user.id} {status_text} a oferta de degustação.")
+        # Após a atualização bem-sucedida, chama a função para redesenhar o menu
+        # que buscará o novo estado diretamente do banco de dados.
+        return await _redraw_settings_menu(update, context)
     else:
         await query.edit_message_text("❌ Ocorreu um erro ao atualizar a configuração. Tente novamente.")
-
-    # Aguarda um pouco e volta para o menu de configurações atualizado
-    await asyncio.sleep(2)
-    return await settings_menu_start(update, context)
+        # Mesmo em caso de erro, redesenha o menu para mostrar o estado anterior consistente.
+        await asyncio.sleep(2)
+        return await _redraw_settings_menu(update, context)
 
 # --- SEÇÃO DE GERENCIAMENTO DE GRUPOS COM LOGS DE DEBUG ---
 
