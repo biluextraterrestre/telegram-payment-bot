@@ -524,27 +524,62 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         # Verifica se há cupom ativo
         active_coupon = context.user_data.get('active_coupon')
-        referral_info = context.user_data.get('referral_info') # Pega a informação da indicação
+        referral_info = context.user_data.get('referral_info')
         final_price = product['price']
-        # ... (cálculo de preço com desconto)
+        original_price = product['price']
 
         if active_coupon:
             discount_type = active_coupon['discount_type']
             discount_value = active_coupon['discount_value']
 
             if discount_type == 'percentage':
-                final_price = product['price'] * (1 - discount_value / 100)
+                final_price = original_price * (1 - discount_value / 100)
             else:
-                final_price = max(0, product['price'] - discount_value)
+                final_price = max(0, original_price - discount_value)
 
+
+        # --- CORREÇÃO PRINCIPAL PARA CUPOM DE 100% ---
+        if final_price < 0.01:
             await query.edit_message_text(
+                text=f"✅ Cupom de 100% aplicado!\n\nLiberando seu acesso ao plano '{product['name']}'..."
+            )
+            db_user = await db.get_or_create_user(tg_user)
+            if not db_user:
+                await query.edit_message_text("❌ Ocorreu um erro ao encontrar seu usuário. Tente novamente.")
+                return
+
+            # Gera uma "nota" para identificar essa concessão
+            coupon_code = active_coupon['code'] if active_coupon else 'FREE_ACCESS'
+            notes = f"cupom_100%_{coupon_code}_{uuid.uuid4()}"
+
+            # Usa a função de concessão manual para criar ou estender a assinatura
+            new_subscription = await db.grant_or_extend_manual_subscription(db_user['id'], product['id'], notes)
+
+            if new_subscription and new_subscription.get("status") != "already_lifetime":
+                await send_access_links(context.bot, tg_user.id, new_subscription.get('mp_payment_id', notes), access_type='purchase')
+                await context.bot.send_message(chat_id=chat_id, text="✅ Acesso liberado! Confira seus links acima.")
+            elif new_subscription and new_subscription.get("status") == "already_lifetime":
+                 await context.bot.send_message(chat_id=chat_id, text="✅ Seu cupom foi validado, mas você já possui acesso vitalício!")
+            else:
+                await query.edit_message_text("❌ Ocorreu um erro ao liberar seu acesso. Por favor, contate o suporte.")
+                await alert_admins(bot_app.bot, f"Falha CRÍTICA ao tentar conceder acesso gratuito com cupom para o usuário {tg_user.id}")
+
+            context.user_data.pop('active_coupon', None)
+            context.user_data.pop('referral_info', None)
+            return # Finaliza o fluxo aqui para não prosseguir para o pagamento
+        # --- FIM DA CORREÇÃO ---
+
+        # Lógica de pagamento normal (só executa se final_price > 0)
+        if active_coupon:
+             await query.edit_message_text(
                 text=f"✅ Cupom aplicado! Desconto ativo.\n\n"
                 f"Gerando sua cobrança PIX para o plano '{product['name']}'...\n"
-                f"💰 Valor original: R$ {product['price']:.2f}\n"
+                f"💰 Valor original: R$ {original_price:.2f}\n"
                 f"🎟️ Valor com desconto: R$ {final_price:.2f}"
             )
         else:
             await query.edit_message_text(text=f"Gerando sua cobrança PIX para o plano '{product['name']}', aguarde...")
+
 
         payment_data = await create_pix_payment(tg_user, product, final_price, active_coupon, referral_info)
 
@@ -555,7 +590,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await context.bot.send_message(chat_id=chat_id, text=f"PIX Copia e Cola:\n\n`{payment_data['pix_copy_paste']}`", parse_mode=ParseMode.MARKDOWN_V2)
             await context.bot.send_message(chat_id=chat_id, text="✅ Assim que o pagamento for confirmado, você receberá o(s) link(s) de acesso automaticamente!")
 
-            # Limpa o cupom do contexto após uso
             context.user_data.pop('active_coupon', None)
             context.user_data.pop('referral_info', None)
         else:

@@ -14,6 +14,11 @@ import db_supabase as db
 
 logger = logging.getLogger(__name__)
 
+# --- CORREÇÃO APLICADA AQUI: Definição da constante ADMIN_IDS ---
+ADMIN_USER_IDS = os.getenv("ADMIN_USER_IDS", "")
+ADMIN_IDS = [int(admin_id.strip()) for admin_id in ADMIN_USER_IDS.split(',')] if ADMIN_USER_IDS else []
+# --- FIM DA CORREÇÃO ---
+
 # --- Carrega o fuso horário uma vez ---
 TIMEZONE_BR = timezone(timedelta(hours=-3))
 
