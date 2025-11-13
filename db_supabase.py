@@ -45,24 +45,38 @@ async def get_setting(key: str) -> Optional[Dict[str, Any]]:
 
 async def update_setting(key: str, value: Dict[str, Any]) -> bool:
     """Atualiza ou cria uma configuração no banco de dados."""
+    if not supabase: return False
     try:
-        existing = supabase.table('settings').select('key').eq('key', key).execute()
+        # 1. Verifica se a configuração já existe de forma assíncrona
+        existing_response = await asyncio.to_thread(
+            lambda: supabase.table('settings').select('key').eq('key', key).execute()
+        )
 
-        if existing.data:
+        # 2. Decide entre atualizar (update) ou criar (insert)
+        if existing_response.data:
             logger.info(f"[DB] Atualizando configuração '{key}' com valor: {value}")
-            response = supabase.table('settings').update({'value': value}).eq('key', key).select().execute()
+            # CORREÇÃO: Removemos o .select() da chamada de atualização
+            response = await asyncio.to_thread(
+                lambda: supabase.table('settings').update({'value': value}).eq('key', key).execute()
+            )
         else:
             logger.info(f"[DB] Criando nova configuração '{key}' com valor: {value}")
-            response = supabase.table('settings').insert({'key': key, 'value': value}).select().execute()
+            # CORREÇÃO: Removemos o .select() da chamada de inserção
+            response = await asyncio.to_thread(
+                lambda: supabase.table('settings').insert({'key': key, 'value': value}).execute()
+            )
 
+        # 3. Verifica se a operação teve sucesso
         if response.data:
             logger.info(f"[DB] Configuração '{key}' salva com sucesso!")
             return True
         else:
-            logger.error(f"[DB] Falha ao salvar configuração '{key}'.")
+            # Loga a resposta completa da API em caso de falha para facilitar o debug
+            logger.error(f"[DB] Falha ao salvar configuração '{key}'. Resposta da API: {response}")
             return False
     except Exception as e:
-        logger.error(f"[DB] Erro ao atualizar configuração '{key}': {e}")
+        # Adiciona exc_info=True para um log de erro mais detalhado
+        logger.error(f"[DB] Erro excepcional ao atualizar configuração '{key}': {e}", exc_info=True)
         return False
 
 
