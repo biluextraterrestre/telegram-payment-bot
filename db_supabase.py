@@ -50,10 +50,10 @@ async def update_setting(key: str, value: Dict[str, Any]) -> bool:
 
         if existing.data:
             logger.info(f"[DB] Atualizando configuração '{key}' com valor: {value}")
-            response = supabase.table('settings').update({'value': value}).eq('key', key).execute()
+            response = supabase.table('settings').update({'value': value}).eq('key', key).select().execute()
         else:
             logger.info(f"[DB] Criando nova configuração '{key}' com valor: {value}")
-            response = supabase.table('settings').insert({'key': key, 'value': value}).execute()
+            response = supabase.table('settings').insert({'key': key, 'value': value}).select().execute()
 
         if response.data:
             logger.info(f"[DB] Configuração '{key}' salva com sucesso!")
