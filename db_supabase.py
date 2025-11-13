@@ -28,31 +28,55 @@ else:
 
 # --- FUNÇÕES DE CONFIGURAÇÕES (SETTINGS) ---
 
-async def get_setting(key: str) -> dict | None:
-    """Busca o valor de uma configuração específica."""
-    if not supabase: return None
+async def get_setting(key: str) -> Optional[Dict[str, Any]]:
+    """Busca uma configuração do banco de dados pela chave."""
     try:
-        response = await asyncio.to_thread(
-            lambda: supabase.table('settings').select('value').eq('key', key).single().execute()
-        )
-        # O valor retornado estará dentro de um dicionário 'value'
-        return response.data.get('value') if response.data else None
+        response = supabase.table('settings').select('value').eq('key', key).single().execute()
+        if response.data:
+            logger.info(f"[DB] Configuração '{key}' encontrada: {response.data.get('value')}")
+            return response.data.get('value', {})
+        else:
+            logger.warning(f"[DB] Configuração '{key}' não encontrada.")
+            return None
     except Exception as e:
-        logger.error(f"❌ [DB] Erro ao buscar configuração '{key}': {e}", exc_info=True)
+        logger.error(f"[DB] Erro ao buscar configuração '{key}': {e}")
         return None
 
-async def update_setting(key: str, value: dict) -> bool:
-    """Atualiza o valor de uma configuração."""
-    if not supabase: return False
+
+async def update_setting(key: str, value: Dict[str, Any]) -> bool:
+    """Atualiza ou cria uma configuração no banco de dados."""
     try:
-        await asyncio.to_thread(
-            lambda: supabase.table('settings').update({'value': value}).eq('key', key).execute()
-        )
-        logger.info(f"✅ [DB] Configuração '{key}' atualizada para {value}.")
-        return True
+        existing = supabase.table('settings').select('id').eq('key', key).execute()
+
+        if existing.data:
+            logger.info(f"[DB] Atualizando configuração '{key}' com valor: {value}")
+            response = supabase.table('settings').update({'value': value}).eq('key', key).execute()
+        else:
+            logger.info(f"[DB] Criando nova configuração '{key}' com valor: {value}")
+            response = supabase.table('settings').insert({'key': key, 'value': value}).execute()
+
+        if response.data:
+            logger.info(f"[DB] Configuração '{key}' salva com sucesso!")
+            return True
+        else:
+            logger.error(f"[DB] Falha ao salvar configuração '{key}'.")
+            return False
     except Exception as e:
-        logger.error(f"❌ [DB] Erro ao atualizar configuração '{key}': {e}", exc_info=True)
+        logger.error(f"[DB] Erro ao atualizar configuração '{key}': {e}")
         return False
+
+
+async def initialize_default_settings():
+    """Inicializa as configurações padrão do sistema."""
+    try:
+        trial_setting = await get_setting('trial_offer')
+        if trial_setting is None:
+            logger.info("[DB] Inicializando configuração padrão de degustação...")
+            success = await update_setting('trial_offer', {'enabled': True})
+            if success:
+                logger.info("[DB] Configuração inicializada com sucesso!")
+    except Exception as e:
+        logger.error(f"[DB] Erro ao inicializar configurações: {e}")
 
 # --- FUNÇÕES DE USUÁRIO ---
 

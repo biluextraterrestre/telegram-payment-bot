@@ -1009,6 +1009,7 @@ async def run_scheduler_webhook():
 async def startup():
     await bot_app.initialize()
     await bot_app.start()
+    await db.initialize_default_settings()
 
     # Define a lista de comandos que aparecerão no menu
     commands = [

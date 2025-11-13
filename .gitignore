@@ -8,6 +8,7 @@ GRUPOS_CANAIS.txt
 backup/
 admin_handlers - Copia.py
 Esquema das tabelas.json
+db_supabase - Copia.py
 
 # Cache do Python
 __pycache__/

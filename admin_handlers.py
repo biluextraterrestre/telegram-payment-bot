@@ -440,13 +440,19 @@ async def _redraw_settings_menu(update: Update, context: ContextTypes.DEFAULT_TY
     Busca o estado MAIS RECENTE do banco de dados e atualiza a mensagem.
     """
     query = update.callback_query
-    await query.answer() # Responde ao clique para o Telegram saber que foi processado
 
-    await query.edit_message_text("⚙️ Carregando configurações...")
+    # Log para debug
+    logger.info("[SETTINGS] Redesenhando menu de configurações...")
+
+    # Responde ao clique
+    await query.answer()
 
     # Busca o status atual da degustação no banco de dados
     trial_setting = await db.get_setting('trial_offer')
     is_trial_enabled = trial_setting.get('enabled', False) if trial_setting else False
+
+    # Log do estado atual
+    logger.info(f"[SETTINGS] Estado atual da degustação: {is_trial_enabled}")
 
     # Define o texto e o botão com base no estado atual
     if is_trial_enabled:
@@ -454,7 +460,6 @@ async def _redraw_settings_menu(update: Update, context: ContextTypes.DEFAULT_TY
         button_text = "🔴 Desativar Degustação"
         button_callback = "settings_trial_disable"
     else:
-        # CORREÇÃO: Usa o emoji de 'X' e o texto correto para o estado desativado
         status_text = "❌ Desativada"
         button_text = "🟢 Ativar Degustação"
         button_callback = "settings_trial_enable"
@@ -464,17 +469,25 @@ async def _redraw_settings_menu(update: Update, context: ContextTypes.DEFAULT_TY
         "Gerencie as funcionalidades do bot.\n\n"
         f"🎁 *Oferta de Degustação:* {status_text}"
     )
+
     keyboard = [
         [InlineKeyboardButton(button_text, callback_data=button_callback)],
         [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back_to_menu")]
     ]
 
     # Edita a mensagem com o menu atualizado
-    await query.edit_message_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode=ParseMode.MARKDOWN
-    )
+    try:
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
+        logger.info("[SETTINGS] Menu atualizado com sucesso!")
+    except BadRequest as e:
+        if "message is not modified" in str(e):
+            logger.info("[SETTINGS] Mensagem já está no estado correto")
+        else:
+            logger.error(f"[SETTINGS] Erro ao editar mensagem: {e}")
 
     return MANAGING_SETTINGS
 
@@ -482,32 +495,38 @@ async def _redraw_settings_menu(update: Update, context: ContextTypes.DEFAULT_TY
 @admin_only
 async def settings_menu_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Ponto de entrada para o menu de configurações."""
-    # Apenas chama a função de redesenhar para mostrar o estado atual
+    logger.info("[SETTINGS] Iniciando menu de configurações...")
     return await _redraw_settings_menu(update, context)
 
 
 @admin_only
 async def settings_toggle_trial(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Ativa ou desativa a oferta de degustação, atualiza o DB e redesenha o menu.
-    """
+    """Ativa ou desativa a oferta de degustação."""
     query = update.callback_query
 
-    # Extrai a ação ('enable' ou 'disable') do callback_data
+    # Extrai a ação do callback_data
     action = query.data.split('_')[-1]
     new_status = (action == 'enable')
 
-    # 1. ATUALIZA A CONFIGURAÇÃO NO BANCO DE DADOS
+    logger.info(f"[SETTINGS] {'Ativando' if new_status else 'Desativando'} degustação...")
+
+    # Atualiza no banco de dados
     success = await db.update_setting('trial_offer', {'enabled': new_status})
 
     if success:
         status_text = "ativada" if new_status else "desativada"
-        await db.create_log('admin_action', f"Admin {update.effective_user.id} {status_text} a oferta de degustação.")
-        # Não precisa mais de query.answer aqui, pois _redraw_settings_menu já faz isso.
+        logger.info(f"[SETTINGS] Degustação {status_text} com sucesso!")
+        await db.create_log(
+            'admin_action',
+            f"Admin {update.effective_user.id} {status_text} a oferta de degustação."
+        )
     else:
-        await query.answer("❌ Erro ao atualizar a configuração no banco de dados!", show_alert=True)
+        logger.error("[SETTINGS] Erro ao atualizar configuração!")
+        await query.answer("❌ Erro ao atualizar a configuração!", show_alert=True)
+        return MANAGING_SETTINGS
 
-    # 2. REDESENHA O MENU para refletir a mudança imediatamente
+    # Redesenha o menu para refletir a mudança
+    logger.info("[SETTINGS] Redesenhando menu...")
     return await _redraw_settings_menu(update, context)
 
 # --- SEÇÃO DE GERENCIAMENTO DE GRUPOS COM LOGS DE DEBUG ---
