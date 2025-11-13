@@ -46,7 +46,7 @@ async def get_setting(key: str) -> Optional[Dict[str, Any]]:
 async def update_setting(key: str, value: Dict[str, Any]) -> bool:
     """Atualiza ou cria uma configuração no banco de dados."""
     try:
-        existing = supabase.table('settings').select('id').eq('key', key).execute()
+        existing = supabase.table('settings').select('key').eq('key', key).execute()
 
         if existing.data:
             logger.info(f"[DB] Atualizando configuração '{key}' com valor: {value}")
