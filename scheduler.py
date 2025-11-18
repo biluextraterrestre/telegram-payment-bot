@@ -62,52 +62,83 @@ async def kick_user_from_all_groups(user_id: int, bot: Bot):
             # --- FIM DA LÓGICA APRIMORADA ---
 
     return removed_count
-# --- FUNÇÕES DO SCHEDULER (A FUNÇÃO QUE FALTAVA FOI REINSERIDA) ---
+
+# --- FUNÇÕES DO SCHEDULER ---
 
 async def find_and_process_expiring_subscriptions(supabase: Client, bot: Bot):
-    """Encontra assinaturas que estão para vencer e envia avisos."""
+    """Encontra assinaturas que estão para vencer e envia UM ÚNICO aviso."""
     try:
         three_days_from_now = (datetime.now(TIMEZONE_BR) + timedelta(days=3)).isoformat()
-        two_days_from_now = (datetime.now(TIMEZONE_BR) + timedelta(days=2)).isoformat()
 
-        # Busca assinaturas que vencem em exatamente 3 dias (entre 2 e 3 dias a partir de agora)
+        # --- LÓGICA DA CONSULTA CORRIGIDA ---
+        # 1. Busca assinaturas que vencem nos próximos 3 dias
+        # 2. NOVO FILTRO: Busca APENAS aquelas que AINDA NÃO receberam o aviso
         response = await asyncio.to_thread(
             lambda: supabase.table('subscriptions')
-            .select('*, user:users(telegram_user_id)')
+            .select('id, user:users(telegram_user_id), end_date') # Seleciona apenas o necessário
             .eq('status', 'active')
+            .eq('expiry_warning_sent', False) # <-- A MUDANÇA MAIS IMPORTANTE
             .lte('end_date', three_days_from_now)
-            .gte('end_date', two_days_from_now)
             .execute()
         )
 
         if not response.data:
-            logger.info("Nenhuma assinatura encontrada para enviar aviso de vencimento.")
+            logger.info("Nenhuma nova assinatura encontrada para enviar aviso de vencimento.")
             return
+
+        logger.info(f"Encontradas {len(response.data)} assinaturas para enviar aviso de vencimento.")
 
         for sub in response.data:
             user_id = sub.get('user', {}).get('telegram_user_id')
-            if user_id:
-                end_date_br = datetime.fromisoformat(sub['end_date']).astimezone(TIMEZONE_BR).strftime('%d/%m/%Y')
-                message = f"Olá! 👋 Sua assinatura está próxima de vencer (em {end_date_br}). Para não perder o acesso, use o comando /renovar e efetue o pagamento."
+            sub_id = sub.get('id') # Pega o ID da assinatura
+
+            if not user_id or not sub_id:
+                continue
+
+            end_date_br = datetime.fromisoformat(sub['end_date']).astimezone(TIMEZONE_BR).strftime('%d/%m/%Y')
+            message = f"Olá! 👋 Sua assinatura está próxima de vencer (em {end_date_br}). Para não perder o acesso, use o comando /renovar e efetue o pagamento."
+
+            try:
+                await bot.send_message(chat_id=user_id, text=message)
+                logger.info(f"Aviso de vencimento enviado para o usuário {user_id} (assinatura {sub_id}).")
+
+                # --- PASSO CRUCIAL: MARCA O AVISO COMO ENVIADO ---
+                # Após o envio bem-sucedido, atualiza o status no banco para não enviar de novo.
+                await asyncio.to_thread(
+                    lambda: supabase.table('subscriptions')
+                    .update({'expiry_warning_sent': True})
+                    .eq('id', sub_id)
+                    .execute()
+                )
+                logger.info(f"Assinatura {sub_id} marcada como 'aviso enviado'.")
+                # --- FIM DO PASSO CRUCIAL ---
+
+                await asyncio.sleep(0.1)
+
+            except RetryAfter as e:
+                logger.warning(f"Rate limit atingido ao enviar aviso para {user_id}. Aguardando {e.retry_after} segundos.")
+                await asyncio.sleep(e.retry_after)
+                # Tenta novamente após a espera
                 try:
                     await bot.send_message(chat_id=user_id, text=message)
-                    logger.info(f"Aviso de vencimento enviado para o usuário {user_id}.")
-
-                    await asyncio.sleep(0.1) # Adiciona um pequeno delay proativo
-
-                # --- LÓGICA DE RETRY ADICIONADA AQUI ---
-                except RetryAfter as e:
-                    logger.warning(f"Rate limit atingido ao enviar aviso para {user_id}. Aguardando {e.retry_after} segundos.")
-                    await asyncio.sleep(e.retry_after)
-                    try:
-                        await bot.send_message(chat_id=user_id, text=message)
-                        logger.info(f"Aviso de vencimento enviado para o usuário {user_id} após retry.")
-                    except Exception as e_inner:
-                        logger.error(f"Falha ao reenviar aviso para {user_id} após retry: {e_inner}")
-                # --- FIM DA LÓGICA DE RETRY ---
-
-                except (Forbidden, BadRequest):
-                    logger.warning(f"Não foi possível enviar aviso para o usuário {user_id} (bloqueou o bot?).")
+                    await asyncio.to_thread(
+                        lambda: supabase.table('subscriptions')
+                        .update({'expiry_warning_sent': True})
+                        .eq('id', sub_id)
+                        .execute()
+                    )
+                    logger.info(f"Aviso enviado e assinatura {sub_id} marcada após retry.")
+                except Exception as e_inner:
+                    logger.error(f"Falha ao reenviar aviso para {user_id} após retry: {e_inner}")
+            except (Forbidden, BadRequest):
+                logger.warning(f"Não foi possível enviar aviso para o usuário {user_id} (bloqueou o bot?). Marcando como enviado para não tentar de novo.")
+                # Mesmo que o bot esteja bloqueado, marcamos como enviado para não continuar tentando
+                await asyncio.to_thread(
+                    lambda: supabase.table('subscriptions')
+                    .update({'expiry_warning_sent': True})
+                    .eq('id', sub_id)
+                    .execute()
+                )
     except Exception as e:
         logger.error(f"Erro ao processar avisos de expiração: {e}", exc_info=True)
 
