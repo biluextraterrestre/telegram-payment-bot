@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 
 import db_supabase as db
 from utils import format_date_br, TIMEZONE_BR
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 TRIAL_PRODUCT_ID = int(os.getenv("TRIAL_PRODUCT_ID", 3))
 PRODUCT_ID_MONTHLY = int(os.getenv("PRODUCT_ID_MONTHLY", 0))
 PRODUCT_ID_LIFETIME = int(os.getenv("PRODUCT_ID_LIFETIME", 0))
+WELCOME_ANIMATION_FILE_ID = os.getenv("WELCOME_ANIMATION_FILE_ID")
 
 # === EMOJIS PARA MELHOR VISUAL ===
 EMOJI = {
