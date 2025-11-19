@@ -44,6 +44,36 @@ EMOJI = {
     'channels': '📢'
 }
 
+# === NOVO MENU INICIAL SIMPLIFICADO ===
+async def show_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Exibe o menu inicial simplificado com o foco na conversão."""
+    menu_text = (
+        "Seja bem-vindo(a)! 🔥\n\n"
+        "Clique no botão abaixo para ver nossos planos e ter acesso imediato ao conteúdo."
+    )
+    keyboard = [
+        # Botão 1: Call-to-action principal
+        [InlineKeyboardButton("🔥 QUERO ASSINAR!", callback_data='menu_view_plans')],
+
+        # Botão 2: Acesso ao menu completo
+        [InlineKeyboardButton("ℹ️ Outras Opções (Suporte, Cupons, etc)", callback_data='menu_main')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Verifica se a mensagem veio de um comando /start ou de um clique de botão
+    if update.message:
+        await update.message.reply_text(
+            text=menu_text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(
+            text=menu_text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
+
 # === MENU PRINCIPAL ===
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit=False):
     """
@@ -116,8 +146,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Falha ao enviar animação: {e}. Enviando mensagem de texto.")
         await update.message.reply_text(welcome_caption, parse_mode=ParseMode.MARKDOWN)
 
-    # --- MENSAGEM 3: MENU INTERATIVO ---
-    await show_main_menu(update, context, edit=False)
+    # --- MENSAGEM 2: MENU SIMPLIFICADO ---
+    await show_start_menu(update, context)
 
 # FUNÇÃO PARA EXIBIR A DESCRIÇÃO DOS CANAIS
 async def show_channel_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
