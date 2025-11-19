@@ -40,7 +40,8 @@ EMOJI = {
     'gift': '🎉',
     'link': '🔗',
     'groups': '👥',
-    'trial': '🆓'
+    'trial': '🆓',
+    'channels': '📢'
 }
 
 # === MENU PRINCIPAL ===
@@ -73,7 +74,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edi
     keyboard.extend([
         [InlineKeyboardButton("🎫 Cupons Disponíveis", callback_data='menu_coupons')],
         [InlineKeyboardButton(f"{EMOJI['channels']} Sobre os Canais", callback_data='menu_show_channels')],
-        [InlineKeyboardButton(f"{EMOJI['groups']} Meus Grupos", callback_data='menu_my_groups')],
+        [InlineKeyboardButton(f"{EMOJI['groups']} Meus Canais", callback_data='menu_my_channels')],
         [InlineKeyboardButton(f"{EMOJI['referral']} Programa de Indicação", callback_data='menu_referral')],
         [
             InlineKeyboardButton(f"{EMOJI['support']} Solicitar Suporte", callback_data='menu_support'),
@@ -356,7 +357,7 @@ async def show_trial_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # === MENU: MEUS GRUPOS ===
-async def show_my_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def show_my_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Mostra os grupos que o usuário tem acesso"""
     query = update.callback_query
     await query.answer()
@@ -582,8 +583,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await show_plans(update, context)
     elif data == 'menu_trial':
         await show_trial_info(update, context)
-    elif data == 'menu_my_groups':
-        await show_my_groups(update, context)
+    elif data == 'menu_my_channels':
+        await show_my_channels(update, context)
     elif data == 'menu_referral':
         await show_referral_program(update, context)
     elif data == 'menu_support':
