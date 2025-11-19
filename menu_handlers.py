@@ -142,7 +142,6 @@ async def handle_get_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text("📬 Verificando sua assinatura e gerando novos links...")
 
-    # Busca a assinatura ativa no banco de dados
     user_db = await db.get_user_by_telegram_id(user_id)
     if not user_db:
         await query.edit_message_text("❌ Erro ao buscar suas informações.")
@@ -151,11 +150,20 @@ async def handle_get_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
     subscription = await db.get_active_subscription(user_db['id'])
 
     if subscription:
-        # Chama a função centralizada para enviar os links
         await send_access_links(context.bot, user_id, subscription.get('mp_payment_id', 'manual_request'), access_type='support')
-        # Informa que o processo foi iniciado (a mensagem com os links chega separada)
-        await query.edit_message_text("✅ Prontinho!")
+
+        # Cria o botão de voltar
+        keyboard = [[InlineKeyboardButton(f"{EMOJI['home']} Voltar ao Menu Principal", callback_data='menu_main')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        # mensagem de confirmação e o botão
+        await query.edit_message_text(
+            text="✅ Links enviados!",
+            reply_markup=reply_markup
+        )
+
     else:
+        # ... (a lógica de erro permanece a mesma)
         await query.edit_message_text(
             "❌ Você não possui uma assinatura ativa no momento.\n\n"
             "Use o menu 'Ver Planos' para assinar ou 'Solicitar Suporte' se acredita que isso é um erro."
@@ -546,7 +554,6 @@ async def handle_support_payment(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
 
-    # Cole aqui a mesma informação de contato que você usa em outros lugares
     usuario_suporte = "@sirigueijo"
     texto = (
         f"💡 *Ajuda com Pagamento*\n\n"
@@ -557,11 +564,14 @@ async def handle_support_payment(update: Update, context: ContextTypes.DEFAULT_T
     keyboard = [[InlineKeyboardButton(f"◀️ Voltar", callback_data='menu_support')]]
     await query.edit_message_text(text=texto, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
+
 async def handle_support_other(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Mostra informações para outras dúvidas."""
     query = update.callback_query
     await query.answer()
-    usuario_suporte = "@seu_usuario_de_suporte"
+
+    usuario_suporte = "@sirigueijo" # Se fosse "@seu_usuario_de_suporte", o correto seria "@seu\\_usuario\\_de\\_suporte"
+
     texto = (
         f"❓ *Outras Dúvidas*\n\n"
         f"Para qualquer outra questão, sugestão ou problema, "
