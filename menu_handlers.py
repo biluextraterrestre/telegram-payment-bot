@@ -90,11 +90,11 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edi
 
     # 2. Monta o teclado dinamicamente.
     keyboard = [
-        [InlineKeyboardButton(f"{EMOJI['status']} Minha Assinatura", callback_data='menu_subscription_status')],
+        [InlineKeyboardButton(f"🔥 QUERO ASSINAR!", callback_data='menu_view_plans')],
     ]
 
     # Cria a segunda linha de botões
-    plans_row = [InlineKeyboardButton(f"{EMOJI['buy']} Ver Planos", callback_data='menu_view_plans')]
+    plans_row = [InlineKeyboardButton(f"{EMOJI['status']} Minha Assinatura", callback_data='menu_subscription_status')]
     # Adiciona o botão de degustação APENAS se estiver ativado
     if is_trial_enabled:
         plans_row.append(InlineKeyboardButton(f"{EMOJI['trial']} Testar Grátis", callback_data='menu_trial'))
