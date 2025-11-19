@@ -43,77 +43,93 @@ EMOJI = {
 # === MENU PRINCIPAL ===
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit=False):
     """
-    Exibe o menu principal com todas as opções disponíveis.
-    edit=True: edita a mensagem existente (para navegação)
-    edit=False: envia nova mensagem (para /start)
+    Exibe o menu principal. O botão de degustação é exibido condicionalmente.
     """
     user = update.effective_user
-    
-    # Mensagem de boas-vindas personalizada
-    welcome_text = (
+    menu_text = (
         f"Olá, {user.first_name}! 👋\n\n"
-        f"Seja bem-vindo(a) ao nosso bot de gerenciamento de assinaturas.\n"
-        f"Escolha uma opção abaixo para continuar:"
+        f"Use o menu abaixo para navegar pelas opções do bot:"
     )
-    
-    # Construção do teclado
+
+    # 1. Busca a configuração da oferta de degustação no banco de dados.
+    trial_setting = await db.get_setting('trial_offer')
+    is_trial_enabled = trial_setting and trial_setting.get('enabled', False)
+
+    # 2. Monta o teclado dinamicamente.
     keyboard = [
-        [
-            InlineKeyboardButton(
-                f"{EMOJI['status']} Minha Assinatura",
-                callback_data='menu_subscription_status'
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                f"{EMOJI['buy']} Ver Planos",
-                callback_data='menu_view_plans'
-            ),
-            InlineKeyboardButton(
-                f"{EMOJI['trial']} Testar Grátis",
-                callback_data='menu_trial'
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                f"{EMOJI['groups']} Meus Grupos",
-                callback_data='menu_my_groups'
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                f"{EMOJI['referral']} Programa de Indicação",
-                callback_data='menu_referral'
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                f"{EMOJI['support']} Solicitar Suporte",
-                callback_data='menu_support'
-            ),
-            InlineKeyboardButton(
-                f"{EMOJI['info']} Informações",
-                callback_data='menu_info'
-            )
-        ]
+        [InlineKeyboardButton(f"{EMOJI['status']} Minha Assinatura", callback_data='menu_subscription_status')],
     ]
-    
+
+    # Cria a segunda linha de botões
+    plans_row = [InlineKeyboardButton(f"{EMOJI['buy']} Ver Planos", callback_data='menu_view_plans')]
+    # Adiciona o botão de degustação APENAS se estiver ativado
+    if is_trial_enabled:
+        plans_row.append(InlineKeyboardButton(f"{EMOJI['trial']} Testar Grátis", callback_data='menu_trial'))
+    keyboard.append(plans_row)
+
+    # Adiciona o restante dos botões
+    keyboard.extend([
+        [InlineKeyboardButton("🎫 Cupons Disponíveis", callback_data='menu_coupons')],
+        [InlineKeyboardButton(f"{EMOJI['groups']} Meus Grupos", callback_data='menu_my_groups')],
+        [InlineKeyboardButton(f"{EMOJI['referral']} Programa de Indicação", callback_data='menu_referral')],
+        [
+            InlineKeyboardButton(f"{EMOJI['support']} Solicitar Suporte", callback_data='menu_support'),
+            InlineKeyboardButton(f"{EMOJI['info']} Informações", callback_data='menu_info')
+        ]
+    ])
+
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     if edit and update.callback_query:
-        await update.callback_query.edit_message_text(
-            text=welcome_text,
-            reply_markup=reply_markup
-        )
+        await update.callback_query.edit_message_text(text=menu_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     else:
-        await update.message.reply_text(
-            text=welcome_text,
-            reply_markup=reply_markup
-        )
+        await update.message.reply_text(text=menu_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
 # === HANDLER DO COMANDO /start ===
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /start - exibe o menu principal"""
+    """
+    Comando /start completo:
+    1. Envia animação com a primeira mensagem.
+    2. Envia a descrição detalhada dos canais.
+    3. Envia o menu principal interativo.
+    """
+    tg_user = update.effective_user
+    await db.get_or_create_user(tg_user)
+
+    # --- MENSAGEM 1: ANIMAÇÃO E CAPTION INICIAL ---
+    welcome_caption = (
+        f"Olá, {tg_user.first_name}!\n\n"
+        f"*Bem-vindo ao nosso Bot VIP de Conteúdo Adulto (+18!)* 🔥\n\n"
+        f"Aqui, você acessa o *melhor* do entretenimento erótico premium, com canais exclusivos cheios de vídeos quentes e conteúdos que vão te deixar sem fôlego. Tudo administrado de forma *segura* e *discreta* pelo nosso bot – basta pagar uma taxa acessível e entrar no *paraíso do prazer ilimitado*!\n\n"
+    )
+    try:
+        await update.message.reply_animation(
+            animation=WELCOME_ANIMATION_FILE_ID,
+            caption=welcome_caption,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except BadRequest as e:
+        logger.error(f"Falha ao enviar animação: {e}. Enviando mensagem de texto.")
+        await update.message.reply_text(welcome_caption, parse_mode=ParseMode.MARKDOWN)
+
+    # --- MENSAGEM 2: DESCRIÇÃO DETALHADA DOS CANAIS ---
+    follow_up_message = (
+        f"*Descubra um mundo de prazer nos nossos canais VIP:*\n\n"
+        f"- *ANAL PROFISSIONAL*: Vídeos *intensos* de sexo anal profissional, com cenas *explosivas* que vão despertar seus desejos mais profundos!\n\n"
+        f"- *VIP BRASIL*: As brasileiras mais *quentes* e *famosas* da internet, mostrando talento e sensualidade em conteúdos *exclusivos*!\n\n"
+        f"- *AMADORES*: Paixão crua e autêntica com casais e solos amadores, trazendo o calor de momentos *reais* e sem filtros!\n\n"
+        f"- *VAZADOS*: Conteúdos *secretos* e *exclusivos*, com vazamentos que vão te surpreender e deixar com vontade de mais!\n\n"
+        f"- *TRANS*: Beleza e sensualidade sem limites, com performances *arrojadas* que celebram a diversidade e o prazer!\n\n"
+        f"- *COROAS (MILF)*: Mulheres maduras, *sedutoras* e experientes, entregando conteúdos que mostram que a idade só aumenta o fogo!\n\n"
+        f"- *CORNOS (CUCKOLD)*: Fantasias *provocantes* de cuckold, com cenas de submissão e dominação que exploram o lado mais *ousado* do desejo!\n\n"
+        f"- *TUFOS*: Histórias em quadrinhos *eróticas* da família Sacana, com tramas *picantes* e personagens que vão te deixar vidrado!\n\n"
+        f"- *HENTAI*: Animes adultos *explícitos* trazendo fantasias sem censura para realizar todos os seus fetiches!\n\n"
+        f"- *CAROLINE ZALOG*: Vídeos exclusivos da musa fitness *irresistível* que vão te deixar sem fôlego!\n\n"
+        f"Com uma assinatura, você desbloqueia *acesso total* a todos esses canais, com atualizações diárias. Pagamento seguro via PIX e *privacidade absoluta* garantida."
+    )
+    await update.message.reply_text(text=follow_up_message, parse_mode=ParseMode.MARKDOWN)
+
+    # --- MENSAGEM 3: MENU INTERATIVO ---
     await show_main_menu(update, context, edit=False)
 
 # === MENU: STATUS DA ASSINATURA ===
@@ -121,9 +137,9 @@ async def show_subscription_status(update: Update, context: ContextTypes.DEFAULT
     """Mostra o status atual da assinatura do usuário"""
     query = update.callback_query
     await query.answer()
-    
+
     user_id = update.effective_user.id
-    
+
     # Busca informações do usuário e assinatura ativa
     user_db = await db.get_user_by_telegram_id(user_id)
     if not user_db:
@@ -134,9 +150,9 @@ async def show_subscription_status(update: Update, context: ContextTypes.DEFAULT
             ]])
         )
         return
-    
+
     subscription = await db.get_active_subscription(user_db['id'])
-    
+
     if not subscription:
         text = (
             "📭 *Nenhuma assinatura ativa*\n\n"
@@ -151,11 +167,11 @@ async def show_subscription_status(update: Update, context: ContextTypes.DEFAULT
     else:
         # Busca informações do produto
         product = await db.get_product_by_id(subscription['product_id'])
-        
+
         # Calcula dias restantes
         end_date = datetime.fromisoformat(subscription['end_date'])
         days_left = (end_date - datetime.now(TIMEZONE_BR)).days
-        
+
         # Status visual
         if days_left > 7:
             status_emoji = EMOJI['check']
@@ -166,7 +182,7 @@ async def show_subscription_status(update: Update, context: ContextTypes.DEFAULT
         else:
             status_emoji = EMOJI['cross']
             status_text = "Expirada"
-        
+
         text = (
             f"📊 *Status da Assinatura*\n\n"
             f"🏷️ *Plano:* {product['name']}\n"
@@ -174,19 +190,19 @@ async def show_subscription_status(update: Update, context: ContextTypes.DEFAULT
             f"📅 *Início:* {format_date_br(subscription['start_date'])}\n"
             f"📅 *Término:* {format_date_br(subscription['end_date'])}\n"
         )
-        
+
         if subscription.get('original_price') and subscription.get('final_price'):
             if subscription['original_price'] != subscription['final_price']:
                 text += f"\n💰 *Valor Pago:* R$ {subscription['final_price']:.2f} (desconto aplicado)"
             else:
                 text += f"\n💰 *Valor Pago:* R$ {subscription['final_price']:.2f}"
-        
+
         keyboard = [
             [InlineKeyboardButton(f"{EMOJI['renew']} Renovar/Estender", callback_data='menu_view_plans')],
             [InlineKeyboardButton(f"{EMOJI['link']} Obter Links dos Grupos", callback_data='menu_get_links')],
             [InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')]
         ]
-    
+
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
         text=text,
@@ -199,10 +215,10 @@ async def show_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Exibe todos os planos disponíveis para compra"""
     query = update.callback_query
     await query.answer()
-    
+
     # Busca todos os produtos ativos
     products = await db.get_all_products()
-    
+
     if not products:
         await query.edit_message_text(
             text="❌ Nenhum plano disponível no momento. Tente novamente mais tarde.",
@@ -211,16 +227,16 @@ async def show_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]])
         )
         return
-    
+
     text = "💳 *Planos Disponíveis*\n\nEscolha o plano ideal para você:\n\n"
-    
+
     keyboard = []
-    
+
     for product in products:
         # Pula o produto de trial
         if product['id'] == TRIAL_PRODUCT_ID:
             continue
-            
+
         # Descrição do produto
         duration_text = ""
         if product.get('duration_days'):
@@ -228,12 +244,12 @@ async def show_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 duration_text = f" ({product['duration_days'] // 365} ano(s))"
             else:
                 duration_text = f" ({product['duration_days']} dias)"
-        
+
         recurrent_text = " 🔄" if product.get('is_recurrent') else ""
-        
+
         text += f"• *{product['name']}*{duration_text}{recurrent_text}\n"
         text += f"  💵 R$ {product['price']:.2f}\n\n"
-        
+
         # Botão para este produto
         keyboard.append([
             InlineKeyboardButton(
@@ -241,7 +257,7 @@ async def show_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 callback_data=f'pay_{product["id"]}'
             )
         ])
-    
+
     # Opção de usar cupom
     keyboard.append([
         InlineKeyboardButton(
@@ -249,11 +265,11 @@ async def show_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
             callback_data='menu_apply_coupon'
         )
     ])
-    
+
     keyboard.append([
         InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')
     ])
-    
+
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
         text=text,
@@ -266,10 +282,10 @@ async def show_trial_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Exibe informações sobre o período de degustação"""
     query = update.callback_query
     await query.answer()
-    
+
     user_id = update.effective_user.id
     user_db = await db.get_user_by_telegram_id(user_id)
-    
+
     if not user_db:
         await query.edit_message_text(
             text="❌ Erro ao buscar suas informações. Use /start para começar.",
@@ -278,10 +294,10 @@ async def show_trial_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]])
         )
         return
-    
+
     # Verifica se já usou o trial
     has_trial = await db.user_has_trial_subscription(user_db['id'])
-    
+
     if has_trial:
         text = (
             "⚠️ *Degustação já utilizada*\n\n"
@@ -310,7 +326,7 @@ async def show_trial_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )],
             [InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')]
         ]
-    
+
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
         text=text,
@@ -323,10 +339,10 @@ async def show_my_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Mostra os grupos que o usuário tem acesso"""
     query = update.callback_query
     await query.answer()
-    
+
     user_id = update.effective_user.id
     user_db = await db.get_user_by_telegram_id(user_id)
-    
+
     if not user_db:
         await query.edit_message_text(
             text="❌ Erro ao buscar suas informações.",
@@ -335,10 +351,10 @@ async def show_my_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]])
         )
         return
-    
+
     # Verifica se tem assinatura ativa
     subscription = await db.get_active_subscription(user_db['id'])
-    
+
     if not subscription:
         text = (
             "📭 *Você não possui acesso ativo*\n\n"
@@ -354,14 +370,14 @@ async def show_my_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Calcula dias restantes
         end_date = datetime.fromisoformat(subscription['end_date'])
         time_left = end_date - datetime.now(TIMEZONE_BR)
-        
+
         if time_left.days > 0:
             time_text = f"{time_left.days} dia(s)"
         else:
             hours_left = time_left.seconds // 3600
             minutes_left = (time_left.seconds % 3600) // 60
             time_text = f"{hours_left}h {minutes_left}min"
-        
+
         text = (
             f"{EMOJI['groups']} *Seus Grupos de Acesso*\n\n"
             f"✅ Você tem acesso ativo!\n"
@@ -379,7 +395,7 @@ async def show_my_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )],
             [InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')]
         ]
-    
+
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
         text=text,
@@ -392,10 +408,10 @@ async def show_referral_program(update: Update, context: ContextTypes.DEFAULT_TY
     """Mostra informações do programa de indicação"""
     query = update.callback_query
     await query.answer()
-    
+
     user_id = update.effective_user.id
     user_db = await db.get_user_by_telegram_id(user_id)
-    
+
     if not user_db:
         await query.edit_message_text(
             text="❌ Erro ao buscar suas informações.",
@@ -404,12 +420,12 @@ async def show_referral_program(update: Update, context: ContextTypes.DEFAULT_TY
             ]])
         )
         return
-    
+
     referral_code = user_db.get('referral_code', 'N/A')
-    
+
     # Busca estatísticas de indicações
     referrals_count = await db.count_user_referrals(user_db['id'])
-    
+
     text = (
         f"{EMOJI['referral']} *Programa de Indicação*\n\n"
         f"Indique amigos e ganhe benefícios!\n\n"
@@ -421,7 +437,7 @@ async def show_referral_program(update: Update, context: ContextTypes.DEFAULT_TY
         f"3. Você ganha recompensas quando eles assinarem\n\n"
         f"💡 *Dica:* Quanto mais indicar, mais benefícios você acumula!"
     )
-    
+
     keyboard = [
         [InlineKeyboardButton(
             "📤 Compartilhar Código",
@@ -429,7 +445,7 @@ async def show_referral_program(update: Update, context: ContextTypes.DEFAULT_TY
         )],
         [InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')]
     ]
-    
+
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
         text=text,
@@ -442,13 +458,13 @@ async def show_support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Menu de opções de suporte"""
     query = update.callback_query
     await query.answer()
-    
+
     text = (
         f"{EMOJI['support']} *Central de Suporte*\n\n"
         f"Como podemos ajudar você hoje?\n\n"
         f"Escolha uma das opções abaixo:"
     )
-    
+
     keyboard = [
         [InlineKeyboardButton(
             "🔗 Reenviar Links dos Grupos",
@@ -464,7 +480,7 @@ async def show_support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )],
         [InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')]
     ]
-    
+
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
         text=text,
@@ -477,7 +493,7 @@ async def show_info_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Exibe informações gerais sobre o serviço"""
     query = update.callback_query
     await query.answer()
-    
+
     text = (
         f"{EMOJI['info']} *Informações do Serviço*\n\n"
         f"📚 *Sobre nós:*\n"
@@ -494,12 +510,12 @@ async def show_info_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💬 *Precisa de mais ajuda?*\n"
         f"Use nossa Central de Suporte!"
     )
-    
+
     keyboard = [
         [InlineKeyboardButton(f"{EMOJI['support']} Central de Suporte", callback_data='menu_support')],
         [InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')]
     ]
-    
+
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
         text=text,
@@ -512,23 +528,23 @@ async def show_coupon_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Instrui o usuário a enviar o código do cupom"""
     query = update.callback_query
     await query.answer()
-    
+
     text = (
         "🎫 *Usar Cupom de Desconto*\n\n"
         "Digite o código do seu cupom na próxima mensagem.\n\n"
         "Exemplo: `DESCONTO10`\n\n"
         "Após validar o cupom, você poderá escolher seu plano com o desconto aplicado."
     )
-    
+
     keyboard = [[InlineKeyboardButton(f"{EMOJI['back']} Cancelar", callback_data='menu_view_plans')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await query.edit_message_text(
         text=text,
         reply_markup=reply_markup,
         parse_mode=ParseMode.MARKDOWN
     )
-    
+
     # Define o estado para aguardar o cupom
     context.user_data['awaiting_coupon'] = True
 
@@ -537,7 +553,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     """Router principal para todos os callbacks de menu"""
     query = update.callback_query
     data = query.data
-    
+
     # Roteamento baseado no callback_data
     if data == 'menu_main':
         await show_main_menu(update, context, edit=True)
@@ -557,21 +573,160 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await show_info_menu(update, context)
     elif data == 'menu_apply_coupon':
         await show_coupon_input(update, context)
+    elif data == 'menu_coupons':
+        await show_active_coupons(update, context)
+    elif data.startswith('copy_coupon_'):
+        await handle_copy_coupon(update, context)
     # Adicione outros handlers conforme necessário
     else:
         # Para callbacks não tratados aqui, deixa passar para outros handlers
         return
+
+# === MENU: CUPONS ATIVOS ===
+async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mostra todos os cupons ativos disponíveis"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    user_db = await db.get_user_by_telegram_id(user_id)
+
+    if not user_db:
+        await query.edit_message_text(
+            text="❌ Erro ao buscar suas informações.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(f"{EMOJI['home']} Menu Principal", callback_data='menu_main')
+            ]])
+        )
+        return
+
+    # Busca cupons ativos
+    coupons = await db.get_active_coupons()
+
+    if not coupons:
+        text = (
+            "🎫 *Cupons Disponíveis*\n\n"
+            "No momento não há cupons ativos disponíveis.\n\n"
+            "📢 Fique atento! Novos cupons são disponibilizados regularmente.\n"
+            "Siga nossos canais para não perder as promoções!"
+        )
+        keyboard = [[InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')]]
+    else:
+        text = "🎫 *Cupons Disponíveis*\n\n"
+        text += "Copie o código e use na hora de comprar para ganhar desconto!\n\n"
+
+        keyboard = []
+
+        for coupon in coupons:
+            # Verifica se o usuário já usou este cupom
+            already_used = await db.check_user_used_coupon(user_db['id'], coupon['id'])
+
+            # Calcula informações do cupom
+            if coupon['discount_type'] == 'percentage':
+                discount_text = f"{coupon['discount_value']:.0f}%"
+            else:
+                discount_text = f"R$ {coupon['discount_value']:.2f}"
+
+            # Validade
+            valid_until = datetime.fromisoformat(coupon['valid_until'])
+            days_left = (valid_until - datetime.now(TIMEZONE_BR)).days
+
+            if days_left == 0:
+                validity_text = "⏰ Expira hoje!"
+            elif days_left == 1:
+                validity_text = "⏰ Expira amanhã"
+            else:
+                validity_text = f"📅 Válido por {days_left} dias"
+
+            # Usos disponíveis
+            if coupon.get('usage_limit'):
+                uses_left = coupon['usage_limit'] - coupon.get('usage_count', 0)
+                usage_text = f"🎟️ {uses_left} usos restantes"
+            else:
+                usage_text = "🎟️ Usos ilimitados"
+
+            # Status de uso do usuário
+            if already_used:
+                status_emoji = "✅"
+                status_text = "(Você já usou)"
+            else:
+                status_emoji = "🆕"
+                status_text = "(Disponível)"
+
+            # Adiciona ao texto
+            text += (
+                f"{status_emoji} *{coupon['code']}*\n"
+                f"💰 Desconto: {discount_text}\n"
+                f"{validity_text} | {usage_text}\n"
+                f"_{status_text}_\n\n"
+            )
+
+            # Adiciona botão para copiar (se não usou)
+            if not already_used:
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"📋 Copiar: {coupon['code']}",
+                        callback_data=f"copy_coupon_{coupon['code']}"
+                    )
+                ])
+
+        # Informação de como usar
+        text += (
+            "\n💡 *Como usar:*\n"
+            "1. Escolha seu plano em 'Ver Planos'\n"
+            "2. Clique em 'Tenho um Cupom'\n"
+            "3. Digite o código do cupom\n"
+            "4. Pronto! O desconto será aplicado"
+        )
+
+        keyboard.append([InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+
+async def handle_copy_coupon(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handler para quando usuário clica em 'Copiar Cupom'.
+    Envia o código em uma mensagem separada para facilitar a cópia.
+    """
+    query = update.callback_query
+    await query.answer("✅ Código copiável enviado!")
+
+    # Extrai o código do cupom do callback_data
+    coupon_code = query.data.replace('copy_coupon_', '')
+
+    # Envia mensagem separada com o código
+    message = (
+        f"🎫 *Código do Cupom:*\n\n"
+        f"`{coupon_code}`\n\n"
+        f"💡 Toque no código acima para copiar!\n\n"
+        f"Para usar:\n"
+        f"1. Vá em 'Ver Planos'\n"
+        f"2. Escolha um plano\n"
+        f"3. Clique em 'Tenho um Cupom'\n"
+        f"4. Cole o código"
+    )
+
+    await query.message.reply_text(
+        text=message,
+        parse_mode=ParseMode.MARKDOWN
+    )
 
 # === REGISTRAR HANDLERS ===
 def register_menu_handlers(application):
     """Registra todos os handlers de menu no bot"""
     # Comando /start
     application.add_handler(CommandHandler("start", start_command))
-    
+
     # Callbacks de menu (padrão menu_*)
     application.add_handler(CallbackQueryHandler(
         handle_menu_callback,
         pattern='^menu_'
     ))
-    
+
     logger.info("✅ Handlers de menu registrados com sucesso!")

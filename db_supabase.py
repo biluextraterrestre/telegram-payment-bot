@@ -1133,6 +1133,59 @@ def get_supabase_client() -> Client:
         )
     return _supabase_client
 
+async def get_active_coupons() -> list:
+    """
+    Retorna todos os cupons ativos e válidos no momento.
+
+    Returns:
+        Lista de dicionários com informações dos cupons
+    """
+    supabase = get_supabase_client()
+    now = datetime.now().isoformat()
+
+    response = await asyncio.to_thread(
+        lambda: supabase.table('coupons')
+        .select('*')
+        .eq('is_active', True)
+        .lte('valid_from', now)
+        .gte('valid_until', now)
+        .execute()
+    )
+
+    # Filtra cupons que ainda têm usos disponíveis
+    active_coupons = []
+    for coupon in response.data:
+        # Se não tem limite, ou ainda tem usos disponíveis
+        if not coupon.get('usage_limit') or coupon.get('usage_count', 0) < coupon['usage_limit']:
+            active_coupons.append(coupon)
+
+    return active_coupons
+
+
+async def check_user_used_coupon(user_id: int, coupon_id: int) -> bool:
+    """
+    Verifica se o usuário já usou um cupom específico.
+
+    Args:
+        user_id: ID interno do usuário
+        coupon_id: ID do cupom
+
+    Returns:
+        True se já usou, False caso contrário
+    """
+    supabase = get_supabase_client()
+
+    response = await asyncio.to_thread(
+        lambda: supabase.table('coupon_usage')
+        .select('id')
+        .eq('user_id', user_id)
+        .eq('coupon_id', coupon_id)
+        .limit(1)
+        .execute()
+    )
+
+    return len(response.data) > 0
+
 
 
 

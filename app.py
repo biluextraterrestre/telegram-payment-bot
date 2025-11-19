@@ -65,76 +65,6 @@ app = Quart(__name__)
 
 # --- HANDLERS DE COMANDOS DO USUÁRIO ---
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler do comando /start. Mostra as opções de pagamento."""
-    tg_user = update.effective_user
-    await db.get_or_create_user(tg_user)
-
-    product_monthly = await db.get_product_by_id(PRODUCT_ID_MONTHLY)
-    product_lifetime = await db.get_product_by_id(PRODUCT_ID_LIFETIME)
-
-    if not product_monthly or not product_lifetime:
-        await update.message.reply_text("Desculpe, estamos com um problema em nossos sistemas. Tente novamente mais tarde.")
-        logger.error("Não foi possível carregar os produtos do banco de dados.")
-        return
-
-    welcome_caption = (
-        f"Olá, {tg_user.first_name}!\n\n" \
-        f"*Bem-vindo ao nosso Bot VIP de Conteúdo Adulto (+18!)* 🔥\n\n" \
-        f"Aqui, você acessa o *melhor* do entretenimento erótico premium, com canais exclusivos cheios de vídeos quentes e conteúdos que vão te deixar sem fôlego. Tudo administrado de forma *segura* e *discreta* pelo nosso bot – basta pagar uma taxa acessível e entrar no *paraíso do prazer ilimitado*!\n\n"
-    )
-
-    logger.info(f"Função /start: Tentando enviar animação com file_id: '{WELCOME_ANIMATION_FILE_ID}'")
-
-    try:
-        await update.message.reply_animation(
-            animation=WELCOME_ANIMATION_FILE_ID,
-            caption=welcome_caption,
-            parse_mode=ParseMode.MARKDOWN
-        )
-    except BadRequest as e:
-        logger.error(f"Falha ao enviar animação: {e}. Enviando mensagem de texto.")
-        await update.message.reply_text(welcome_caption, parse_mode=ParseMode.MARKDOWN)
-
-    follow_up_message = (
-        f"*Descubra um mundo de prazer nos nossos canais VIP:*\n\n" \
-        f"- *ANAL PROFISSIONAL*: Vídeos *intensos* de sexo anal profissional, com cenas *explosivas* que vão despertar seus desejos mais profundos!\n\n" \
-        f"- *VIP BRASIL*: As brasileiras mais *quentes* e *famosas* da internet, mostrando talento e sensualidade em conteúdos *exclusivos*!\n\n" \
-        f"- *AMADORES*: Paixão crua e autêntica com casais e solos amadores, trazendo o calor de momentos *reais* e sem filtros!\n\n" \
-        f"- *VAZADOS*: Conteúdos *secretos* e *exclusivos*, com vazamentos que vão te surpreender e deixar com vontade de mais!\n\n" \
-        f"- *TRANS*: Beleza e sensualidade sem limites, com performances *arrojadas* que celebram a diversidade e o prazer!\n\n" \
-        f"- *COROAS (MILF)*: Mulheres maduras, *sedutoras* e experientes, entregando conteúdos que mostram que a idade só aumenta o fogo!\n\n" \
-        f"- *CORNOS (CUCKOLD)*: Fantasias *provocantes* de cuckold, com cenas de submissão e dominação que exploram o lado mais *ousado* do desejo!\n\n" \
-        f"- *TUFOS*: Histórias em quadrinhos *eróticas* da família Sacana, com tramas *picantes* e personagens que vão te deixar vidrado!\n\n" \
-        f"- *HENTAI*: Animes adultos *explícitos* trazendo fantasias sem censura para realizar todos os seus fetiches!\n\n" \
-        f"- *CAROLINE ZALOG*: Vídeos exclusivos da musa fitness *irresistível* que vão te deixar sem fôlego!\n\n" \
-        f"Com uma assinatura mensal ou pagamento único, você desbloqueia *acesso total* a todos esses canais, com atualizações diárias. Pagamento seguro via PIX e *privacidade absoluta* garantida.\n\n" \
-        f"*Escolha seu plano e mergulhe no prazer hoje mesmo! Se quiser, você pode experimentar nossos canais gratuitamente por 30 minutos.*"
-    )
-
-    # --- LÓGICA CORRETA PARA OS BOTÕES ---
-    keyboard = []
-
-    # 1. Busca a configuração no banco de dados
-    trial_setting = await db.get_setting('trial_offer')
-
-    # 2. Adiciona o botão de degustação APENAS SE a configuração for 'enabled: true'
-    if trial_setting and trial_setting.get('enabled', False):
-        keyboard.append([InlineKeyboardButton("🎁 Degustação Gratuita (30 min)", callback_data='start_trial')])
-
-    # 3. Adiciona os botões de pagamento
-    keyboard.extend([
-        [InlineKeyboardButton(f"✅ Assinatura Mensal (R$ {product_monthly['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_MONTHLY}')],
-        [InlineKeyboardButton(f"💎 Acesso Vitalício (R$ {product_lifetime['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_LIFETIME}')]
-    ])
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        text=follow_up_message,
-        reply_markup=reply_markup,
-        parse_mode=ParseMode.MARKDOWN
-    )
-
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler do comando /status. Mostra o status da assinatura."""
     tg_user = update.effective_user
@@ -970,7 +900,7 @@ bot_app.add_handler(cupom_handler)
 bot_app.add_handler(ChatMemberHandler(on_chat_member_update, ChatMemberHandler.CHAT_MEMBER))
 
 # 3. Comandos regulares
-bot_app.add_handler(CommandHandler("start", start))
+#bot_app.add_handler(CommandHandler("start", start))
 bot_app.add_handler(CommandHandler("status", status_command))
 bot_app.add_handler(CommandHandler("renovar", renew_command))
 bot_app.add_handler(CommandHandler("suporte", support_command))
