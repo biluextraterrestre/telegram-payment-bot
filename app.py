@@ -911,12 +911,12 @@ bot_app.add_handler(CommandHandler("getid", get_id_command))
 
 bot_app.add_handler(CommandHandler("getstate", get_state_command))
 
-# 4. CallbackQueryHandler geral por último
-bot_app.add_handler(CallbackQueryHandler(button_handler))
-
 # --- SISTEMA DE MENUS INTERATIVOS ---
 register_menu_handlers(bot_app)
 logger.info("✅ Sistema de menus interativos registrado com sucesso!")
+
+# 4. CallbackQueryHandler geral por último
+bot_app.add_handler(CallbackQueryHandler(button_handler))
 
 # --- ROTA PARA EXECUTAR O SCHEDULER EXTERNAMENTE ---
 SCHEDULER_SECRET_TOKEN = os.getenv("SCHEDULER_SECRET_TOKEN")
