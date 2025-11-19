@@ -1135,32 +1135,41 @@ def get_supabase_client() -> Client:
 
 async def get_active_coupons() -> list:
     """
-    Retorna todos os cupons ativos e válidos no momento.
-
-    Returns:
-        Lista de dicionários com informações dos cupons
+    Retorna todos os cupons que estão ativos e dentro do período de validade.
     """
     supabase = get_supabase_client()
-    now = datetime.now().isoformat()
+    now_iso = datetime.now(TIMEZONE_BR).isoformat()
 
-    response = await asyncio.to_thread(
-        lambda: supabase.table('coupons')
-        .select('*')
-        .eq('is_active', True)
-        .lte('valid_from', now)
-        .gte('valid_until', now)
-        .execute()
-    )
+    try:
+        # A função rpc lida com a lógica complexa no lado do banco de dados
+        response = await asyncio.to_thread(
+            lambda: supabase.rpc('get_valid_coupons').execute()
+        )
+        return response.data or []
+    except Exception as e:
+        logger.error(f"Erro ao chamar RPC get_valid_coupons: {e}. Usando método fallback.")
+        # --- MÉTODO FALLBACK CASO A RPC FALHE ---
+        response = await asyncio.to_thread(
+            lambda: supabase.table('coupons').select('*').eq('is_active', True).execute()
+        )
 
-    # Filtra cupons que ainda têm usos disponíveis
-    active_coupons = []
-    for coupon in response.data:
-        # Se não tem limite, ou ainda tem usos disponíveis
-        if not coupon.get('usage_limit') or coupon.get('usage_count', 0) < coupon['usage_limit']:
-            active_coupons.append(coupon)
+        valid_coupons = []
+        now = datetime.now(TIMEZONE_BR)
+        for coupon in response.data or []:
+            # Verifica se o uso não excedeu o limite
+            usage_limit = coupon.get('usage_limit')
+            if usage_limit is not None and coupon.get('usage_count', 0) >= usage_limit:
+                continue
 
-    return active_coupons
+            # Verifica a data de validade
+            valid_until_str = coupon.get('valid_until')
+            if valid_until_str:
+                valid_until = datetime.fromisoformat(valid_until_str)
+                if now > valid_until:
+                    continue # Cupom expirado
 
+            valid_coupons.append(coupon)
+        return valid_coupons
 
 async def check_user_used_coupon(user_id: int, coupon_id: int) -> bool:
     """

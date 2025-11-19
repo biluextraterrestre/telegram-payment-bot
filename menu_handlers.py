@@ -13,7 +13,7 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest
 
 import db_supabase as db
-from utils import format_date_br, TIMEZONE_BR
+from utils import format_date_br, TIMEZONE_BR, send_access_links
 from content import CHANNEL_DESCRIPTION_TEXT
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edi
     """
     user = update.effective_user
     menu_text = (
-        f"Use o menu abaixo para navegar pelas opções do bot:"
+        f"Use o menu abaixo para navegar pelas opções:"
     )
 
     # 1. Busca a configuração da oferta de degustação no banco de dados.
@@ -102,7 +102,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- MENSAGEM 1: ANIMAÇÃO E CAPTION INICIAL ---
     welcome_caption = (
-        f"Olá, {tg_user.first_name}!\n\n"
+        f"Olá, *{tg_user.first_name}*!\n\n"
         f"*Bem-vindo ao nosso Bot VIP de Conteúdo Adulto (+18!)* 🔥\n\n"
         f"Aqui, você acessa o *melhor* do entretenimento erótico premium, com canais exclusivos cheios de vídeos quentes e conteúdos que vão te deixar sem fôlego. Tudo administrado de forma *segura* e *discreta* pelo nosso bot – basta pagar uma taxa acessível e entrar no *paraíso do prazer ilimitado*!\n\n"
     )
@@ -133,6 +133,33 @@ async def show_channel_description(update: Update, context: ContextTypes.DEFAULT
         reply_markup=reply_markup,
         parse_mode=ParseMode.MARKDOWN
     )
+
+# FUNÇÃO PARA ENVIAR LINKS
+async def handle_get_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Verifica a assinatura e envia os links de acesso ao usuário."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+
+    await query.edit_message_text("📬 Verificando sua assinatura e gerando novos links...")
+
+    # Busca a assinatura ativa no banco de dados
+    user_db = await db.get_user_by_telegram_id(user_id)
+    if not user_db:
+        await query.edit_message_text("❌ Erro ao buscar suas informações.")
+        return
+
+    subscription = await db.get_active_subscription(user_db['id'])
+
+    if subscription:
+        # Chama a função centralizada para enviar os links
+        await send_access_links(context.bot, user_id, subscription.get('mp_payment_id', 'manual_request'), access_type='support')
+        # Informa que o processo foi iniciado (a mensagem com os links chega separada)
+        await query.edit_message_text("✅ Links enviados para o seu privado!")
+    else:
+        await query.edit_message_text(
+            "❌ Você não possui uma assinatura ativa no momento.\n\n"
+            "Use o menu 'Ver Planos' para assinar ou 'Solicitar Suporte' se acredita que isso é um erro."
+        )
 
 async def show_available_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Exibe os cupons de desconto ativos."""
@@ -443,27 +470,33 @@ async def show_referral_program(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return
 
-    referral_code = user_db.get('referral_code', 'N/A')
+    # --- LÓGICA DE CORREÇÃO APLICADA AQUI ---
+    # 1. Gera o código de forma determinística
+    referral_code = f"REF{user.id}"
+
+    # 2. Garante que ele exista no banco de dados
+    await db.ensure_referral_code_exists(user.id, referral_code)
+    # --- FIM DA CORREÇÃO ---
 
     # Busca estatísticas de indicações
     referrals_count = await db.count_user_referrals(user_db['id'])
 
     text = (
         f"{EMOJI['referral']} *Programa de Indicação*\n\n"
-        f"Indique amigos e ganhe benefícios!\n\n"
+        f"Indique amigos e ganhe *7 dias de acesso grátis* para cada amigo que assinar!\n\n" # Texto melhorado
         f"📋 *Seu código:* `{referral_code}`\n"
-        f"👥 *Indicações realizadas:* {referrals_count}\n\n"
+        f"👥 *Indicações convertidas:* {referrals_count}\n\n" # Texto melhorado
         f"🎁 *Como funciona:*\n"
-        f"1. Compartilhe seu código com amigos\n"
-        f"2. Eles usam o código ao se cadastrar\n"
-        f"3. Você ganha recompensas quando eles assinarem\n\n"
-        f"💡 *Dica:* Quanto mais indicar, mais benefícios você acumula!"
+        f"1. Compartilhe seu código com amigos.\n"
+        f"2. Eles usam o código no comando /cupom.\n"
+        f"3. Você ganha 7 dias de acesso quando eles assinarem!\n\n"
     )
 
+    share_text = f"Use o código {referral_code} no bot para ganhar benefícios!"
     keyboard = [
         [InlineKeyboardButton(
             "📤 Compartilhar Código",
-            url=f"https://t.me/share/url?url=Use o código {referral_code} para se cadastrar!"
+            url=f"https://t.me/share/url?text={share_text}"
         )],
         [InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')]
     ]
@@ -509,6 +542,36 @@ async def show_support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup,
         parse_mode=ParseMode.MARKDOWN
     )
+
+async def handle_support_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mostra informações de ajuda com pagamento."""
+    query = update.callback_query
+    await query.answer()
+
+    # Cole aqui a mesma informação de contato que você usa em outros lugares
+    usuario_suporte = "@seu_usuario_de_suporte"
+    texto = (
+        f"💡 *Ajuda com Pagamento*\n\n"
+        f"Se você teve algum problema com o pagamento via PIX automático, "
+        f"por favor, entre em contato com nosso suporte para resolvermos rapidamente.\n\n"
+        f"➡️ Contato: {usuario_suporte}"
+    )
+    keyboard = [[InlineKeyboardButton(f"◀️ Voltar", callback_data='menu_support')]]
+    await query.edit_message_text(text=texto, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+
+async def handle_support_other(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mostra informações para outras dúvidas."""
+    query = update.callback_query
+    await query.answer()
+    usuario_suporte = "@seu_usuario_de_suporte"
+    texto = (
+        f"❓ *Outras Dúvidas*\n\n"
+        f"Para qualquer outra questão, sugestão ou problema, "
+        f"fale diretamente com nosso suporte.\n\n"
+        f"➡️ Contato: {usuario_suporte}"
+    )
+    keyboard = [[InlineKeyboardButton(f"◀️ Voltar", callback_data='menu_support')]]
+    await query.edit_message_text(text=texto, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
 # === MENU: INFORMAÇÕES ===
 async def show_info_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -589,6 +652,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await show_referral_program(update, context)
     elif data == 'menu_support':
         await show_support_menu(update, context)
+    elif data == 'support_resend_links': # Este já deveria existir no seu handler de suporte
+        await handle_get_links(update, context) # Reutilizamos a função dos links
+    elif data == 'support_payment_issue':
+        await handle_support_payment(update, context)
+    elif data == 'support_other':
+        await handle_support_other(update, context)
     elif data == 'menu_info':
         await show_info_menu(update, context)
     elif data == 'menu_apply_coupon':
@@ -597,6 +666,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await show_channel_description(update, context)
     elif data == 'menu_coupons':
         await show_active_coupons(update, context)
+    elif data == 'menu_get_links':
+        await handle_get_links(update, context)
     elif data.startswith('copy_coupon_'):
         await handle_copy_coupon(update, context)
     # Adicione outros handlers conforme necessário
