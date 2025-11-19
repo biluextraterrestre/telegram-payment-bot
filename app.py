@@ -25,7 +25,7 @@ from admin_handlers import get_admin_conversation_handler, ADMIN_IDS, states_lis
 from utils import format_date_br, send_access_links, alert_admins
 from menu_handlers import register_menu_handlers
 
-# --- CONFIGURAÇÃO DE LOGGING ---
+# --- CONFIGURAÇÃO DE LOGGING ------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
