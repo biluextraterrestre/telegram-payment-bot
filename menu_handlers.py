@@ -13,7 +13,7 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest
 
 import db_supabase as db
-from utils import format_date_br, TIMEZONE_BR, send_access_links
+from utils import format_date_br, TIMEZONE_BR, send_access_links, alert_admins
 from content import CHANNEL_DESCRIPTION_TEXT
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,8 @@ TRIAL_PRODUCT_ID = int(os.getenv("TRIAL_PRODUCT_ID", 3))
 PRODUCT_ID_MONTHLY = int(os.getenv("PRODUCT_ID_MONTHLY", 0))
 PRODUCT_ID_LIFETIME = int(os.getenv("PRODUCT_ID_LIFETIME", 0))
 WELCOME_ANIMATION_FILE_ID = os.getenv("WELCOME_ANIMATION_FILE_ID")
+MERCADO_PAGO_ACCESS_TOKEN = os.getenv("MERCADO_PAGO_ACCESS_TOKEN")
+NOTIFICATION_URL = f"{os.getenv('WEBHOOK_BASE_URL')}/webhook/mercadopago"
 
 # === EMOJIS PARA MELHOR VISUAL ===
 EMOJI = {
@@ -662,9 +664,13 @@ async def show_coupon_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Router principal para todos os callbacks de menu"""
     query = update.callback_query
-    data = query.data
+    await query.answer() # Responde ao clique imediatamente
 
-    # Roteamento baseado no callback_data
+    data = query.data
+    tg_user = update.effective_user
+    chat_id = query.message.chat_id
+
+    # --- LÓGICA DE NAVEGAÇÃO DO MENU ---
     if data == 'menu_main':
         await show_main_menu(update, context, edit=True)
     elif data == 'menu_subscription_status':
@@ -679,8 +685,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await show_referral_program(update, context)
     elif data == 'menu_support':
         await show_support_menu(update, context)
-    elif data == 'support_resend_links': # Este já deveria existir no seu handler de suporte
-        await handle_get_links(update, context) # Reutilizamos a função dos links
+    elif data == 'support_resend_links':
+        await handle_get_links(update, context)
     elif data == 'support_payment_issue':
         await handle_support_payment(update, context)
     elif data == 'support_other':
@@ -697,10 +703,74 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await handle_get_links(update, context)
     elif data.startswith('copy_coupon_'):
         await handle_copy_coupon(update, context)
-    # Adicione outros handlers conforme necessário
-    else:
-        # Para callbacks não tratados aqui, deixa passar para outros handlers
-        return
+
+    # --- LÓGICA DE PAGAMENTO E AÇÕES ---
+    elif data.startswith('pay_'):
+        product_id = int(data.split('_')[1])
+        product = await db.get_product_by_id(product_id)
+        if not product:
+            await query.edit_message_text(text="Desculpe, este produto não está mais disponível.")
+            return
+
+        active_coupon = context.user_data.get('active_coupon')
+        referral_info = context.user_data.get('referral_info')
+        final_price = product['price']
+        original_price = product['price']
+
+        if active_coupon:
+            discount_type = active_coupon['discount_type']
+            discount_value = active_coupon['discount_value']
+            if discount_type == 'percentage':
+                final_price = original_price * (1 - discount_value / 100)
+            else:
+                final_price = max(0, original_price - discount_value)
+
+        if final_price < 0.01:
+            # Lógica de cupom 100%
+            await query.edit_message_text(text=f"✅ Cupom de 100% aplicado! Liberando seu acesso...")
+            db_user = await db.get_or_create_user(tg_user)
+            notes = f"cupom_100%_{active_coupon['code'] if active_coupon else 'FREE'}"
+            new_subscription = await db.grant_or_extend_manual_subscription(db_user['id'], product['id'], notes)
+            if new_subscription:
+                await send_access_links(context.bot, tg_user.id, notes, access_type='purchase')
+            else:
+                await query.edit_message_text("❌ Erro ao liberar seu acesso. Contate o suporte.")
+            context.user_data.clear()
+            return
+
+        if active_coupon:
+            await query.edit_message_text(text=f"✅ Cupom aplicado! Gerando PIX com desconto...")
+        else:
+            await query.edit_message_text(text=f"Gerando sua cobrança PIX, aguarde...")
+
+        payment_data = await create_pix_payment(tg_user, product, final_price, active_coupon, referral_info)
+
+        if payment_data:
+            qr_code_image = base64.b64decode(payment_data['qr_code_base64'])
+            image_stream = io.BytesIO(qr_code_image)
+            await context.bot.send_photo(chat_id=chat_id, photo=image_stream, caption="Use o QR Code acima ou o código abaixo para pagar.")
+            await context.bot.send_message(chat_id=chat_id, text=f"PIX Copia e Cola:\n\n`{payment_data['pix_copy_paste']}`", parse_mode=ParseMode.MARKDOWN_V2)
+            await context.bot.send_message(chat_id=chat_id, text="✅ Pagamento confirmado? Você receberá os links de acesso em instantes!")
+            context.user_data.clear()
+        else:
+            await query.edit_message_text(text="❌ Erro ao gerar sua cobrança. Tente novamente ou contate o suporte.")
+
+    elif data == 'confirm_trial':
+        # Lógica de degustação
+        db_user = await db.get_or_create_user(tg_user)
+        active_sub = await db.get_user_active_subscription(tg_user.id)
+        if active_sub:
+            await query.edit_message_text("Você já possui uma assinatura ativa!")
+            return
+
+        can_start_trial = await db.check_and_set_trial_used(db_user['id'])
+        if can_start_trial:
+            await query.edit_message_text("✅ Gerando seu acesso de degustação...")
+            trial_sub = await db.create_trial_subscription(db_user['id'])
+            if trial_sub:
+                await send_access_links(context.bot, tg_user.id, trial_sub['mp_payment_id'], access_type='trial')
+        else:
+            await query.edit_message_text("❌ Você já utilizou seu período de degustação.")
 
 # === MENU: CUPONS ATIVOS ===
 async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE):

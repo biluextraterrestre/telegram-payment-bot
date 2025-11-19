@@ -205,6 +205,20 @@ async def get_state_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     # --- FIM DA CORREÇÃO DE FORMATAÇÃO ---
 
 # --- NOVO: COMANDO /CUPOM ---
+async def handle_coupon_code_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Verifica se o bot está aguardando um cupom e, se estiver, processa a mensagem.
+    """
+    # Se a flag 'awaiting_coupon' não estiver no user_data, ignora a mensagem.
+    if not context.user_data.get('awaiting_coupon'):
+        return
+
+    # Remove a flag para não processar a próxima mensagem como um cupom.
+    context.user_data.pop('awaiting_coupon', None)
+
+    # Reutiliza a lógica já existente do comando /cupom para aplicar o código.
+    await cupom_apply(update, context)
+
 async def cupom_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Inicia o processo de aplicação de cupom."""
     message = (
@@ -435,200 +449,6 @@ async def get_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except Exception as e:
         logger.error(f"Erro no comando /getid: {e}", exc_info=True)
         await update.message.reply_text(f"❌ Ocorreu um erro ao processar o comando: {e}")
-
-
-# --- HANDLER DE BOTÕES (CALLBACKQUERY) ---
-
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Processa todos os cliques em botões."""
-    query = update.callback_query
-    await query.answer()
-    tg_user = query.from_user
-    chat_id = query.message.chat_id
-    data = query.data
-
-    # Fluxo de Pagamento
-    if data.startswith('pay_'):
-        product_id = int(data.split('_')[1])
-        product = await db.get_product_by_id(product_id)
-        if not product:
-            await query.edit_message_text(text="Desculpe, este produto não está mais disponível.")
-            return
-
-        # Verifica se há cupom ativo
-        active_coupon = context.user_data.get('active_coupon')
-        referral_info = context.user_data.get('referral_info')
-        final_price = product['price']
-        original_price = product['price']
-
-        if active_coupon:
-            discount_type = active_coupon['discount_type']
-            discount_value = active_coupon['discount_value']
-
-            if discount_type == 'percentage':
-                final_price = original_price * (1 - discount_value / 100)
-            else:
-                final_price = max(0, original_price - discount_value)
-
-
-        # --- CORREÇÃO PRINCIPAL PARA CUPOM DE 100% ---
-        if final_price < 0.01:
-            await query.edit_message_text(
-                text=f"✅ Cupom de 100% aplicado!\n\nLiberando seu acesso ao plano '{product['name']}'..."
-            )
-            db_user = await db.get_or_create_user(tg_user)
-            if not db_user:
-                await query.edit_message_text("❌ Ocorreu um erro ao encontrar seu usuário. Tente novamente.")
-                return
-
-            # Gera uma "nota" para identificar essa concessão
-            coupon_code = active_coupon['code'] if active_coupon else 'FREE_ACCESS'
-            notes = f"cupom_100%_{coupon_code}_{uuid.uuid4()}"
-
-            # Usa a função de concessão manual para criar ou estender a assinatura
-            new_subscription = await db.grant_or_extend_manual_subscription(db_user['id'], product['id'], notes)
-
-            if new_subscription and new_subscription.get("status") != "already_lifetime":
-                await send_access_links(context.bot, tg_user.id, new_subscription.get('mp_payment_id', notes), access_type='purchase')
-                await context.bot.send_message(chat_id=chat_id, text="✅ Acesso liberado! Confira seus links acima.")
-            elif new_subscription and new_subscription.get("status") == "already_lifetime":
-                 await context.bot.send_message(chat_id=chat_id, text="✅ Seu cupom foi validado, mas você já possui acesso vitalício!")
-            else:
-                await query.edit_message_text("❌ Ocorreu um erro ao liberar seu acesso. Por favor, contate o suporte.")
-                await alert_admins(bot_app.bot, f"Falha CRÍTICA ao tentar conceder acesso gratuito com cupom para o usuário {tg_user.id}")
-
-            context.user_data.pop('active_coupon', None)
-            context.user_data.pop('referral_info', None)
-            return # Finaliza o fluxo aqui para não prosseguir para o pagamento
-        # --- FIM DA CORREÇÃO ---
-
-        # Lógica de pagamento normal (só executa se final_price > 0)
-        if active_coupon:
-             await query.edit_message_text(
-                text=f"✅ Cupom aplicado! Desconto ativo.\n\n"
-                f"Gerando sua cobrança PIX para o plano '{product['name']}'...\n"
-                f"💰 Valor original: R$ {original_price:.2f}\n"
-                f"🎟️ Valor com desconto: R$ {final_price:.2f}"
-            )
-        else:
-            await query.edit_message_text(text=f"Gerando sua cobrança PIX para o plano '{product['name']}', aguarde...")
-
-
-        payment_data = await create_pix_payment(tg_user, product, final_price, active_coupon, referral_info)
-
-        if payment_data:
-            qr_code_image = base64.b64decode(payment_data['qr_code_base64'])
-            image_stream = io.BytesIO(qr_code_image)
-            await context.bot.send_photo(chat_id=chat_id, photo=image_stream, caption="Use o QR Code acima ou o código abaixo para pagar.")
-            await context.bot.send_message(chat_id=chat_id, text=f"PIX Copia e Cola:\n\n`{payment_data['pix_copy_paste']}`", parse_mode=ParseMode.MARKDOWN_V2)
-            await context.bot.send_message(chat_id=chat_id, text="✅ Assim que o pagamento for confirmado, você receberá o(s) link(s) de acesso automaticamente!")
-
-            context.user_data.pop('active_coupon', None)
-            context.user_data.pop('referral_info', None)
-        else:
-            await query.edit_message_text(text="Desculpe, ocorreu um erro ao gerar sua cobrança. Tente novamente mais tarde ou use /suporte.")
-
-    # Fluxo de Degustação
-    elif data == 'start_trial':
-        # --- VERIFICAÇÃO ADICIONAL DE SEGURANÇA ---
-        trial_setting = await db.get_setting('trial_offer')
-        if not trial_setting or not trial_setting.get('enabled', False):
-            await query.answer("Desculpe, a oferta de degustação não está disponível no momento.", show_alert=True)
-            await query.edit_message_text("A oferta de degustação está temporariamente desativada. Por favor, escolha um de nossos planos pagos.")
-            return
-        # --- FIM DA VERIFICAÇÃO ---
-
-        await query.edit_message_text("Verificando sua elegibilidade para a degustação...")
-
-        db_user = await db.get_or_create_user(tg_user)
-        # Verifica se o usuário já tem uma assinatura ativa antes de iniciar o trial
-        active_sub = await db.get_user_active_subscription(tg_user.id)
-        if active_sub:
-            await query.edit_message_text("Você já possui uma assinatura ativa! Não é necessário iniciar a degustação.")
-            return
-
-        can_start_trial = await db.check_and_set_trial_used(db_user['id'])
-
-        if can_start_trial:
-            await query.edit_message_text("✅ Você é elegível! Gerando seu acesso temporário...")
-            trial_sub = await db.create_trial_subscription(db_user['id'])
-
-            if trial_sub:
-                await send_access_links(context.bot, tg_user.id, trial_sub['mp_payment_id'], access_type='trial')
-
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text="⚠️ *Atenção:* Seu acesso de degustação expira em 30 minutos! Após esse período, você será removido(a) automaticamente dos grupos.",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-
-                # --- AGENDAMENTO DOS LEMBRETES ---
-                job_queue = context.application.job_queue
-
-                # Horários a partir do FIM da degustação (30 minutos a partir de agora)
-                # 1. Primeiro lembrete: 3 horas após o fim do trial (3h 30m a partir de agora)
-                job_queue.run_once(send_first_reminder, when=timedelta(hours=3, minutes=30), user_id=tg_user.id, name=f"reminder1_{tg_user.id}")
-
-                # 2. Segundo lembrete: 5 horas após o fim do trial (5h 30m a partir de agora)
-                job_queue.run_once(send_second_reminder, when=timedelta(hours=5, minutes=30), user_id=tg_user.id, name=f"reminder2_{tg_user.id}")
-
-                # 3. Terceiro lembrete: 7 horas após o fim do trial (7h 30m a partir de agora)
-                job_queue.run_once(send_third_reminder, when=timedelta(hours=7, minutes=30), user_id=tg_user.id, name=f"reminder3_{tg_user.id}")
-
-                logger.info(f"Lembretes de remarketing agendados para o usuário {tg_user.id}.")
-                # --- FIM DO AGENDAMENTO ---
-            else:
-                await query.edit_message_text("❌ Ocorreu um erro ao gerar seu acesso. Por favor, contate o suporte.")
-
-        # --- SEÇÃO MODIFICADA ---
-        else:
-            # Se o usuário não é elegível, mostra a mensagem e os botões de plano diretamente.
-            product_monthly = await db.get_product_by_id(PRODUCT_ID_MONTHLY)
-            product_lifetime = await db.get_product_by_id(PRODUCT_ID_LIFETIME)
-
-            if not product_monthly or not product_lifetime:
-                await query.edit_message_text("❌ Você já usou a degustação. Tivemos um problema ao carregar os planos. Por favor, use /start novamente.")
-                return
-
-            keyboard = [
-                [InlineKeyboardButton(f"✅ Assinatura Mensal (R$ {product_monthly['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_MONTHLY}')],
-                [InlineKeyboardButton(f"💎 Acesso Vitalício (R$ {product_lifetime['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_LIFETIME}')]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
-            await query.edit_message_text(
-                text="❌ Você já utilizou seu período de degustação. Para continuar, por favor, escolha um de nossos planos:",
-                reply_markup=reply_markup,
-                parse_mode=ParseMode.MARKDOWN
-            )
-        # --- FIM DA SEÇÃO MODIFICADA ---
-
-    # Fluxo de Suporte
-    elif data == 'support_resend_links':
-        await query.edit_message_text("Verificando sua assinatura, um momento...")
-        subscription = await db.get_user_active_subscription(tg_user.id)
-        if subscription and subscription.get('status') == 'active':
-            await query.edit_message_text("Encontramos sua assinatura ativa! Verificando seus acessos e reenviando links se necessário...")
-            await send_access_links(context.bot, tg_user.id, subscription['mp_payment_id'], access_type='support')
-        else:
-            await query.edit_message_text("Não encontrei uma assinatura ativa para você. Se você já pagou, use a opção 'Ajuda com Pagamento' ou aguarde alguns minutos pela confirmação.")
-
-    elif data == 'support_payment_help':
-        chave_pix = "234caf84-775c-4649-aaf1-ab7d928ef315"
-        usuario_suporte = "@sirigueijo"
-        usuario_suporte_escapado = usuario_suporte.replace("_", "\\_")
-
-        texto = (
-            "💡 *Ajuda com Pagamento*\n\n"
-            "Se o pagamento automático falhou, você pode tentar pagar manualmente para a chave PIX:\n\n"
-            f"`{chave_pix}`\n\n"
-            f"*IMPORTANTE:* Após o pagamento manual, envie o comprovante para {usuario_suporte_escapado} para liberação\\."
-        )
-
-        await query.edit_message_text(
-            text=texto,
-            parse_mode=ParseMode.MARKDOWN_V2
-        )
 
 
 # --- LÓGICA DE PAGAMENTO E ACESSO ---
@@ -900,6 +720,8 @@ cupom_handler = ConversationHandler(
 bot_app.add_handler(get_admin_conversation_handler())
 bot_app.add_handler(cupom_handler)
 
+bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_coupon_code_message))
+
 bot_app.add_handler(ChatMemberHandler(on_chat_member_update, ChatMemberHandler.CHAT_MEMBER))
 
 # 3. Comandos regulares
@@ -917,9 +739,6 @@ bot_app.add_handler(CommandHandler("getstate", get_state_command))
 # --- SISTEMA DE MENUS INTERATIVOS ---
 register_menu_handlers(bot_app)
 logger.info("✅ Sistema de menus interativos registrado com sucesso!")
-
-# 4. CallbackQueryHandler geral por último
-bot_app.add_handler(CallbackQueryHandler(button_handler))
 
 # --- ROTA PARA EXECUTAR O SCHEDULER EXTERNAMENTE ---
 SCHEDULER_SECRET_TOKEN = os.getenv("SCHEDULER_SECRET_TOKEN")
