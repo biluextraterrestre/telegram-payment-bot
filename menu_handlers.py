@@ -14,6 +14,7 @@ from telegram.error import BadRequest
 
 import db_supabase as db
 from utils import format_date_br, TIMEZONE_BR
+from content import CHANNEL_DESCRIPTION_TEXT
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,6 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edi
     """
     user = update.effective_user
     menu_text = (
-        f"Olá, {user.first_name}! 👋\n\n"
         f"Use o menu abaixo para navegar pelas opções do bot:"
     )
 
@@ -72,6 +72,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edi
     # Adiciona o restante dos botões
     keyboard.extend([
         [InlineKeyboardButton("🎫 Cupons Disponíveis", callback_data='menu_coupons')],
+        [InlineKeyboardButton(f"{EMOJI['channels']} Sobre os Canais", callback_data='menu_show_channels')],
         [InlineKeyboardButton(f"{EMOJI['groups']} Meus Grupos", callback_data='menu_my_groups')],
         [InlineKeyboardButton(f"{EMOJI['referral']} Programa de Indicação", callback_data='menu_referral')],
         [
@@ -114,25 +115,43 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Falha ao enviar animação: {e}. Enviando mensagem de texto.")
         await update.message.reply_text(welcome_caption, parse_mode=ParseMode.MARKDOWN)
 
-    # --- MENSAGEM 2: DESCRIÇÃO DETALHADA DOS CANAIS ---
-    follow_up_message = (
-        f"*Descubra um mundo de prazer nos nossos canais VIP:*\n\n"
-        f"- *ANAL PROFISSIONAL*: Vídeos *intensos* de sexo anal profissional, com cenas *explosivas* que vão despertar seus desejos mais profundos!\n\n"
-        f"- *VIP BRASIL*: As brasileiras mais *quentes* e *famosas* da internet, mostrando talento e sensualidade em conteúdos *exclusivos*!\n\n"
-        f"- *AMADORES*: Paixão crua e autêntica com casais e solos amadores, trazendo o calor de momentos *reais* e sem filtros!\n\n"
-        f"- *VAZADOS*: Conteúdos *secretos* e *exclusivos*, com vazamentos que vão te surpreender e deixar com vontade de mais!\n\n"
-        f"- *TRANS*: Beleza e sensualidade sem limites, com performances *arrojadas* que celebram a diversidade e o prazer!\n\n"
-        f"- *COROAS (MILF)*: Mulheres maduras, *sedutoras* e experientes, entregando conteúdos que mostram que a idade só aumenta o fogo!\n\n"
-        f"- *CORNOS (CUCKOLD)*: Fantasias *provocantes* de cuckold, com cenas de submissão e dominação que exploram o lado mais *ousado* do desejo!\n\n"
-        f"- *TUFOS*: Histórias em quadrinhos *eróticas* da família Sacana, com tramas *picantes* e personagens que vão te deixar vidrado!\n\n"
-        f"- *HENTAI*: Animes adultos *explícitos* trazendo fantasias sem censura para realizar todos os seus fetiches!\n\n"
-        f"- *CAROLINE ZALOG*: Vídeos exclusivos da musa fitness *irresistível* que vão te deixar sem fôlego!\n\n"
-        f"Com uma assinatura, você desbloqueia *acesso total* a todos esses canais, com atualizações diárias. Pagamento seguro via PIX e *privacidade absoluta* garantida."
-    )
-    await update.message.reply_text(text=follow_up_message, parse_mode=ParseMode.MARKDOWN)
-
     # --- MENSAGEM 3: MENU INTERATIVO ---
     await show_main_menu(update, context, edit=False)
+
+# FUNÇÃO PARA EXIBIR A DESCRIÇÃO DOS CANAIS
+async def show_channel_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Exibe a descrição detalhada dos canais VIP."""
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = [[InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        text=CHANNEL_DESCRIPTION_TEXT,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def show_available_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Exibe os cupons de desconto ativos."""
+    query = update.callback_query
+    await query.answer()
+    coupons = await db.get_all_coupons(include_inactive=False)
+    if not coupons:
+        text = "😕 Nenhum cupom de desconto disponível no momento."
+    else:
+        text = "🎫 *Cupons de Desconto Ativos*\n\n"
+        for coupon in coupons:
+            code = coupon['code']
+            discount_text = f"{int(coupon['discount_value'])}%" if coupon['discount_type'] == 'percentage' else f"R$ {coupon['discount_value']:.2f}"
+            text += f"• `{code}` - *{discount_text} de desconto*\n"
+        text += "\nPara usar, use o comando /cupom ou clique em 'Ver Planos' e 'Tenho um Cupom'."
+    keyboard = [
+        [InlineKeyboardButton(f"{EMOJI['buy']} Ver Planos", callback_data='menu_view_plans')],
+        [InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')]
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
 # === MENU: STATUS DA ASSINATURA ===
 async def show_subscription_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -499,12 +518,10 @@ async def show_info_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         f"{EMOJI['info']} *Informações do Serviço*\n\n"
         f"📚 *Sobre nós:*\n"
-        f"Oferecemos acesso a grupos exclusivos com conteúdo premium de alta qualidade.\n\n"
+        f"Oferecemos acesso a canais exclusivos com conteúdo premium de alta qualidade.\n\n"
         f"❓ *Dúvidas Frequentes:*\n\n"
         f"*• Quanto tempo dura minha assinatura?*\n"
         f"  Depende do plano escolhido. Veja em 'Ver Planos'.\n\n"
-        f"*• Posso testar antes de comprar?*\n"
-        f"  Sim! Oferecemos 30 minutos grátis.\n\n"
         f"*• Como renovo minha assinatura?*\n"
         f"  Acesse 'Minha Assinatura' > 'Renovar'.\n\n"
         f"*• Não recebi os links dos grupos*\n"
@@ -575,6 +592,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await show_info_menu(update, context)
     elif data == 'menu_apply_coupon':
         await show_coupon_input(update, context)
+    elif data == 'menu_show_channels':
+        await show_channel_description(update, context)
     elif data == 'menu_coupons':
         await show_active_coupons(update, context)
     elif data.startswith('copy_coupon_'):
@@ -610,7 +629,6 @@ async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE
             "🎫 *Cupons Disponíveis*\n\n"
             "No momento não há cupons ativos disponíveis.\n\n"
             "📢 Fique atento! Novos cupons são disponibilizados regularmente.\n"
-            "Siga nossos canais para não perder as promoções!"
         )
         keyboard = [[InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')]]
     else:
