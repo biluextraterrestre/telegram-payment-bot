@@ -136,11 +136,12 @@ async def show_channel_description(update: Update, context: ContextTypes.DEFAULT
 
 # FUNÇÃO PARA ENVIAR LINKS
 async def handle_get_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Verifica a assinatura e envia os links de acesso ao usuário."""
+    """Verifica a assinatura e inicia o envio dos links de acesso ao usuário."""
     query = update.callback_query
     user_id = update.effective_user.id
 
-    await query.edit_message_text("📬 Verificando sua assinatura e gerando novos links...")
+    # A mensagem editada agora serve apenas como um feedback de "carregando"
+    await query.edit_message_text("📬 Gerando seus novos links, um momento...")
 
     user_db = await db.get_user_by_telegram_id(user_id)
     if not user_db:
@@ -150,23 +151,11 @@ async def handle_get_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
     subscription = await db.get_active_subscription(user_db['id'])
 
     if subscription:
+        # Apenas chama a função. A confirmação e o botão virão de lá.
         await send_access_links(context.bot, user_id, subscription.get('mp_payment_id', 'manual_request'), access_type='support')
-
-        # Cria o botão de voltar
-        keyboard = [[InlineKeyboardButton(f"{EMOJI['home']} Voltar ao Menu Principal", callback_data='menu_main')]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        # mensagem de confirmação e o botão
-        await query.edit_message_text(
-            text="✅ Links enviados!",
-            reply_markup=reply_markup
-        )
-
     else:
-        # ... (a lógica de erro permanece a mesma)
         await query.edit_message_text(
-            "❌ Você não possui uma assinatura ativa no momento.\n\n"
-            "Use o menu 'Ver Planos' para assinar ou 'Solicitar Suporte' se acredita que isso é um erro."
+            "❌ Você não possui uma assinatura ativa no momento."
         )
 
 async def show_available_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE):

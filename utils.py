@@ -169,8 +169,20 @@ async def send_access_links(bot: Bot, user_id: int, payment_id: str, access_type
     final_message = "".join(message_parts)
 
     try:
-        await bot.send_message(chat_id=user_id, text=final_message, parse_mode=ParseMode.MARKDOWN_V2, disable_web_page_preview=True)
-        logger.info(f"✅ [JOB][{payment_id}] Mensagem com formatação enviada com sucesso para o usuário {user_id}.")
+        # 1. Envia a mensagem principal com todos os links
+        if final_message: # Garante que só envia se houver conteúdo
+            await bot.send_message(chat_id=user_id, text=final_message, parse_mode=ParseMode.MARKDOWN_V2, disable_web_page_preview=True)
+            logger.info(f"✅ [JOB][{payment_id}] Mensagem com links enviada com sucesso para o usuário {user_id}.")
+
+        # 2. SEMPRE envia uma mensagem separada com o botão de voltar, garantindo que ela chegue por último.
+        keyboard = [[InlineKeyboardButton("🏠 Voltar ao Menu Principal", callback_data='menu_main')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await bot.send_message(
+            chat_id=user_id,
+            text="Prontinho! Use o botão abaixo para retornar ao menu.",
+            reply_markup=reply_markup
+        )
+
     except BadRequest as e:
         logger.critical(f"Falha INESPERADA ao enviar msg formatada para {user_id}: {e}. Mensagem: {final_message}")
         plain_text = final_message.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")

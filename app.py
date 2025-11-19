@@ -149,20 +149,13 @@ async def meuslinks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     subscription = await db.get_user_active_subscription(tg_user.id)
 
     if subscription and subscription.get('status') == 'active':
-        await update.message.reply_text("📬 Verificando seus acessos e gerando novos links...")
+        await update.message.reply_text("📬 Gerando seus novos links, um momento...")
+        # Apenas chama a função. A confirmação e o botão virão de lá.
         await send_access_links(context.bot, tg_user.id, subscription['mp_payment_id'], access_type='support')
-
-        keyboard = [[InlineKeyboardButton("🏠 Voltar ao Menu Principal", callback_data='menu_main')]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "Use o botão abaixo para retornar.",
-            reply_markup=reply_markup
-        )
-
     else:
+        # ... (lógica de erro não muda)
         await update.message.reply_text(
-            "❌ Você não possui uma assinatura ativa no momento.\n\n"
-            "Use /start para ver os planos disponíveis ou /suporte se você acredita que isso é um erro."
+            "❌ Você não possui uma assinatura ativa no momento."
         )
 
 
@@ -563,14 +556,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             if trial_sub:
                 await send_access_links(context.bot, tg_user.id, trial_sub['mp_payment_id'], access_type='trial')
 
-                keyboard = [[InlineKeyboardButton("🏠 Voltar ao Menu Principal", callback_data='menu_main')]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text="Aproveite seu acesso! Use o menu para navegar.",
-                    reply_markup=reply_markup
-                )
-
                 await context.bot.send_message(
                     chat_id=chat_id,
                     text="⚠️ *Atenção:* Seu acesso de degustação expira em 30 minutos! Após esse período, você será removido(a) automaticamente dos grupos.",
@@ -748,14 +733,6 @@ async def process_approved_payment(payment_id: str):
 
         logger.info(f"[{payment_id}] Assinatura ativada. Agendando envio de links para o usuário {telegram_user_id}.")
         asyncio.create_task(send_access_links(bot_app.bot, telegram_user_id, payment_id))
-
-        keyboard = [[InlineKeyboardButton("🏠 Ir para o Menu Principal", callback_data='menu_main')]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await bot_app.bot.send_message(
-            chat_id=telegram_user_id,
-            text="Seja bem-vindo(a)! Use o menu para explorar todas as opções.",
-            reply_markup=reply_markup
-        )
 
     else:
         logger.error(f"[{payment_id}] CRÍTICO: Assinatura ativada, mas não foi possível encontrar o telegram_user_id associado.")
