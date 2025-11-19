@@ -985,7 +985,7 @@ bot_app.add_handler(CommandHandler("getstate", get_state_command))
 bot_app.add_handler(CallbackQueryHandler(button_handler))
 
 # --- SISTEMA DE MENUS INTERATIVOS ---
-register_all_handlers(bot_app)
+register_menu_handlers(bot_app)
 logger.info("✅ Sistema de menus interativos registrado com sucesso!")
 
 # --- ROTA PARA EXECUTAR O SCHEDULER EXTERNAMENTE ---
