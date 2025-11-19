@@ -7,10 +7,19 @@ Todas as interações do bot são feitas através de menus com botões inline.
 import os
 import logging
 from datetime import datetime, timezone, timedelta
+
+# importações necessárias para o pagamento
+import httpx
+import json
+import uuid
+import base64
+import io
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
+from telegram import User as TelegramUser # Importação para type hint
 
 import db_supabase as db
 from utils import format_date_br, TIMEZONE_BR, send_access_links, alert_admins
@@ -412,7 +421,7 @@ async def show_trial_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.MARKDOWN
     )
 
-# === MENU: MEUS GRUPOS ===
+# === MENU: MEUS CANAIS ===
 async def show_my_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Mostra os grupos que o usuário tem acesso"""
     query = update.callback_query
@@ -659,6 +668,82 @@ async def show_coupon_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Define o estado para aguardar o cupom
     context.user_data['awaiting_coupon'] = True
+
+# --- LÓGICA DE PAGAMENTO E ACESSO ---
+
+async def create_pix_payment(tg_user: TelegramUser, product: dict, final_price: float, coupon: dict = None, referral_info: dict = None) -> dict | None:
+    """Cria uma cobrança PIX no Mercado Pago e uma assinatura pendente no DB."""
+    url = "https://api.mercadopago.com/v1/payments"
+    headers = {
+        "Authorization": f"Bearer {MERCADO_PAGO_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+        "X-Idempotency-Key": str(uuid.uuid4())
+    }
+
+    # --- MODIFICAÇÃO IMPORTANTE AQUI ---
+    db_user = await db.get_or_create_user(tg_user)
+    if not db_user:
+        logger.error(f"Não foi possível obter/criar o usuário do DB para {tg_user.id}.")
+        return None
+
+    external_ref = f"user_db_id:{db_user['id']};product_id:{product['id']}"
+    if coupon:
+        external_ref += f";coupon_id:{coupon['id']}"
+    if referral_info:
+        external_ref += f";referrer_db_id:{referral_info['referrer_db_id']};ref_code:{referral_info['code']}"
+    # --- FIM DA MODIFICAÇÃO ---
+
+    payload = {
+        "transaction_amount": float(round(final_price, 2)),
+        "description": f"Acesso '{product['name']}' para {tg_user.first_name}",
+        "payment_method_id": "pix",
+        "payer": { "email": f"user_{tg_user.id}@telegram.bot" },
+        "notification_url": NOTIFICATION_URL,
+        "external_reference": external_ref
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=headers, json=payload, timeout=10)
+            response.raise_for_status()
+        data = response.json()
+        mp_payment_id = str(data.get('id'))
+
+        await db.create_pending_subscription(
+            db_user_id=db_user['id'],
+            product_id=product['id'],
+            mp_payment_id=mp_payment_id,
+            original_price=product['price'],
+            final_price=final_price,
+            coupon_id=coupon['id'] if coupon else None,
+            external_reference=external_ref # Salva a referência no DB
+        )
+        return {
+            'qr_code_base64': data['point_of_interaction']['transaction_data']['qr_code_base64'],
+            'pix_copy_paste': data['point_of_interaction']['transaction_data']['qr_code']
+        }
+    except httpx.HTTPError as e:
+        logger.error(f"Erro HTTP ao criar pagamento no Mercado Pago: {e} - Resposta: {e.response.text}")
+
+        error_message = (
+            f"Falha CRÍTICA ao criar pagamento no Mercado Pago para o usuário {tg_user.id} (@{tg_user.username}).\n\n"
+            f"**Erro:** `{e}`\n"
+            f"**Resposta da API:** ```{e.response.text[:500]}```"
+        )
+        await alert_admins(bot_app.bot, error_message)
+
+        return None
+    except Exception as e:
+        logger.error(f"Erro inesperado ao criar pagamento ou transação: {e}", exc_info=True)
+
+        error_message = (
+            f"Erro INESPERADO ao criar pagamento para o usuário {tg_user.id} (@{tg_user.username}).\n\n"
+            f"**Tipo de Erro:** `{type(e).__name__}`\n"
+            f"**Mensagem:** `{str(e)[:500]}`"
+        )
+        await alert_admins(bot_app.bot, error_message)
+
+        return None
 
 # === HANDLER DE CALLBACKS ===
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
