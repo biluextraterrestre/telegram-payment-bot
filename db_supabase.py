@@ -905,3 +905,241 @@ async def get_all_user_ids_from_db() -> list[int]:
         logger.error(f"❌ [DB] Erro ao buscar todos os IDs de usuário: {e}", exc_info=True)
         return []
 
+# NOVIDADES
+
+async def user_has_trial_subscription(user_id: int) -> bool:
+    """
+    Verifica se o usuário já utilizou o período de degustação.
+
+    Args:
+        user_id: ID interno do usuário no banco
+
+    Returns:
+        True se já usou o trial, False caso contrário
+    """
+    supabase = get_supabase_client()  # Assumindo que você tem essa função
+
+    response = await asyncio.to_thread(
+        lambda: supabase.table('subscriptions')
+        .select('id')
+        .eq('user_id', user_id)
+        .eq('product_id', 3)  # TRIAL_PRODUCT_ID
+        .limit(1)
+        .execute()
+    )
+
+    return len(response.data) > 0
+
+
+async def count_user_referrals(user_id: int) -> int:
+    """
+    Conta quantas indicações o usuário fez.
+
+    Args:
+        user_id: ID interno do usuário no banco
+
+    Returns:
+        Número de indicações realizadas
+    """
+    supabase = get_supabase_client()
+
+    response = await asyncio.to_thread(
+        lambda: supabase.table('referrals')
+        .select('id', count='exact')
+        .eq('referrer_id', user_id)
+        .execute()
+    )
+
+    return response.count or 0
+
+
+async def get_all_products() -> list:
+    """
+    Retorna todos os produtos ativos do banco de dados.
+
+    Returns:
+        Lista de dicionários com informações dos produtos
+    """
+    supabase = get_supabase_client()
+
+    response = await asyncio.to_thread(
+        lambda: supabase.table('products')
+        .select('*')
+        .execute()
+    )
+
+    return response.data
+
+
+async def get_product_by_id(product_id: int) -> dict:
+    """
+    Busca um produto específico pelo ID.
+
+    Args:
+        product_id: ID do produto
+
+    Returns:
+        Dicionário com informações do produto ou None
+    """
+    supabase = get_supabase_client()
+
+    response = await asyncio.to_thread(
+        lambda: supabase.table('products')
+        .select('*')
+        .eq('id', product_id)
+        .single()
+        .execute()
+    )
+
+    return response.data if response.data else None
+
+
+async def get_active_subscription(user_id: int) -> dict:
+    """
+    Busca a assinatura ativa do usuário.
+
+    Args:
+        user_id: ID interno do usuário no banco
+
+    Returns:
+        Dicionário com a assinatura ativa ou None
+    """
+    supabase = get_supabase_client()
+    now = datetime.now().isoformat()
+
+    response = await asyncio.to_thread(
+        lambda: supabase.table('subscriptions')
+        .select('*')
+        .eq('user_id', user_id)
+        .eq('status', 'active')
+        .gt('end_date', now)
+        .order('end_date', desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    return response.data[0] if response.data else None
+
+
+async def get_all_group_ids() -> list:
+    """
+    Retorna todos os IDs dos grupos ativos.
+
+    Returns:
+        Lista de IDs dos grupos (telegram_chat_id)
+    """
+    supabase = get_supabase_client()
+
+    response = await asyncio.to_thread(
+        lambda: supabase.table('groups')
+        .select('telegram_chat_id')
+        .eq('is_active', True)
+        .execute()
+    )
+
+    return [group['telegram_chat_id'] for group in response.data]
+
+
+async def get_user_by_telegram_id(telegram_user_id: int) -> dict:
+    """
+    Busca usuário pelo telegram_user_id.
+
+    Args:
+        telegram_user_id: ID do usuário no Telegram
+
+    Returns:
+        Dicionário com informações do usuário ou None
+    """
+    supabase = get_supabase_client()
+
+    response = await asyncio.to_thread(
+        lambda: supabase.table('users')
+        .select('*')
+        .eq('telegram_user_id', telegram_user_id)
+        .single()
+        .execute()
+    )
+
+    return response.data if response.data else None
+
+
+async def validate_coupon(coupon_code: str) -> dict:
+    """
+    Valida um cupom de desconto.
+
+    Args:
+        coupon_code: Código do cupom
+
+    Returns:
+        Dicionário com informações do cupom ou None se inválido
+    """
+    supabase = get_supabase_client()
+    now = datetime.now().isoformat()
+
+    response = await asyncio.to_thread(
+        lambda: supabase.table('coupons')
+        .select('*')
+        .eq('code', coupon_code.upper())
+        .eq('is_active', True)
+        .lte('valid_from', now)
+        .gte('valid_until', now)
+        .execute()
+    )
+
+    if not response.data:
+        return None
+
+    coupon = response.data[0]
+
+    # Verifica se ainda há usos disponíveis
+    if coupon.get('usage_limit') and coupon.get('usage_count', 0) >= coupon['usage_limit']:
+        return None
+
+    return coupon
+
+
+async def apply_coupon_to_price(product_price: float, coupon: dict) -> float:
+    """
+    Calcula o preço final após aplicar o cupom.
+
+    Args:
+        product_price: Preço original do produto
+        coupon: Dicionário com informações do cupom
+
+    Returns:
+        Preço final com desconto aplicado
+    """
+    if coupon['discount_type'] == 'percentage':
+        discount = product_price * (coupon['discount_value'] / 100)
+        return max(0, product_price - discount)
+    elif coupon['discount_type'] == 'fixed':
+        return max(0, product_price - coupon['discount_value'])
+
+    return product_price
+
+
+# === HELPER: Cliente Supabase Singleton ===
+_supabase_client = None
+
+def get_supabase_client() -> Client:
+    """Retorna instância única do cliente Supabase"""
+    global _supabase_client
+    if _supabase_client is None:
+        import os
+        from supabase import create_client
+        _supabase_client = create_client(
+            os.getenv("SUPABASE_URL"),
+            os.getenv("SUPABASE_KEY")
+        )
+    return _supabase_client
+
+
+
+
+
+
+
+
+
+
+

@@ -23,6 +23,7 @@ import db_supabase as db
 import scheduler
 from admin_handlers import get_admin_conversation_handler, ADMIN_IDS, states_list
 from utils import format_date_br, send_access_links, alert_admins
+from menu_handlers import register_menu_handlers
 
 # --- CONFIGURAÇÃO DE LOGGING ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', stream=sys.stdout)
@@ -982,6 +983,10 @@ bot_app.add_handler(CommandHandler("getstate", get_state_command))
 
 # 4. CallbackQueryHandler geral por último
 bot_app.add_handler(CallbackQueryHandler(button_handler))
+
+# --- SISTEMA DE MENUS INTERATIVOS ---
+register_all_handlers(bot_app)
+logger.info("✅ Sistema de menus interativos registrado com sucesso!")
 
 # --- ROTA PARA EXECUTAR O SCHEDULER EXTERNAMENTE ---
 SCHEDULER_SECRET_TOKEN = os.getenv("SCHEDULER_SECRET_TOKEN")

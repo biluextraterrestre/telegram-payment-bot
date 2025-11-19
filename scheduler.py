@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest, Forbidden, RetryAfter
+from telegram.constants import ParseMode
 
 import db_supabase as db
 
@@ -66,18 +67,15 @@ async def kick_user_from_all_groups(user_id: int, bot: Bot):
 # --- FUNÇÕES DO SCHEDULER ---
 
 async def find_and_process_expiring_subscriptions(supabase: Client, bot: Bot):
-    """Encontra assinaturas que estão para vencer e envia UM ÚNICO aviso."""
+    """Encontra assinaturas que estão para vencer e envia UM ÚNICO aviso COM BOTÕES."""
     try:
         three_days_from_now = (datetime.now(TIMEZONE_BR) + timedelta(days=3)).isoformat()
 
-        # --- LÓGICA DA CONSULTA CORRIGIDA ---
-        # 1. Busca assinaturas que vencem nos próximos 3 dias
-        # 2. NOVO FILTRO: Busca APENAS aquelas que AINDA NÃO receberam o aviso
         response = await asyncio.to_thread(
             lambda: supabase.table('subscriptions')
-            .select('id, user:users(telegram_user_id), end_date') # Seleciona apenas o necessário
+            .select('id, user:users(telegram_user_id), end_date, product:products(name)')
             .eq('status', 'active')
-            .eq('expiry_warning_sent', False) # <-- A MUDANÇA MAIS IMPORTANTE
+            .eq('expiry_warning_sent', False)
             .lte('end_date', three_days_from_now)
             .execute()
         )
@@ -90,20 +88,53 @@ async def find_and_process_expiring_subscriptions(supabase: Client, bot: Bot):
 
         for sub in response.data:
             user_id = sub.get('user', {}).get('telegram_user_id')
-            sub_id = sub.get('id') # Pega o ID da assinatura
+            sub_id = sub.get('id')
+            product_name = sub.get('product', {}).get('name', 'Seu plano')
 
             if not user_id or not sub_id:
                 continue
 
-            end_date_br = datetime.fromisoformat(sub['end_date']).astimezone(TIMEZONE_BR).strftime('%d/%m/%Y')
-            message = f"Olá! 👋 Sua assinatura está próxima de vencer (em {end_date_br}). Para não perder o acesso, use o comando /renovar e efetue o pagamento."
+            end_date = datetime.fromisoformat(sub['end_date'])
+            days_left = (end_date - datetime.now(TIMEZONE_BR)).days
+            end_date_br = end_date.astimezone(TIMEZONE_BR).strftime('%d/%m/%Y às %H:%M')
+
+            # Mensagem personalizada com emojis
+            if days_left == 0:
+                time_text = "HOJE"
+                emoji = "🚨"
+            elif days_left == 1:
+                time_text = "AMANHÃ"
+                emoji = "⚠️"
+            else:
+                time_text = f"em {days_left} dias"
+                emoji = "⏰"
+
+            message = (
+                f"{emoji} *Aviso de Vencimento* {emoji}\n\n"
+                f"Olá! Sua assinatura do plano *{product_name}* está próxima de vencer.\n\n"
+                f"📅 *Vence {time_text}* ({end_date_br})\n\n"
+                f"Para continuar aproveitando todo o conteúdo exclusivo, "
+                f"renove sua assinatura agora mesmo! ✨"
+            )
+
+            # NOVO: Adicionar botões para facilitar a renovação
+            keyboard = [
+                [InlineKeyboardButton("🔄 Renovar Agora", callback_data='menu_view_plans')],
+                [InlineKeyboardButton("📊 Ver Minha Assinatura", callback_data='menu_subscription_status')],
+                [InlineKeyboardButton("🏠 Menu Principal", callback_data='menu_main')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
 
             try:
-                await bot.send_message(chat_id=user_id, text=message)
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=message,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.MARKDOWN
+                )
                 logger.info(f"Aviso de vencimento enviado para o usuário {user_id} (assinatura {sub_id}).")
 
-                # --- PASSO CRUCIAL: MARCA O AVISO COMO ENVIADO ---
-                # Após o envio bem-sucedido, atualiza o status no banco para não enviar de novo.
+                # Marca o aviso como enviado
                 await asyncio.to_thread(
                     lambda: supabase.table('subscriptions')
                     .update({'expiry_warning_sent': True})
@@ -111,16 +142,19 @@ async def find_and_process_expiring_subscriptions(supabase: Client, bot: Bot):
                     .execute()
                 )
                 logger.info(f"Assinatura {sub_id} marcada como 'aviso enviado'.")
-                # --- FIM DO PASSO CRUCIAL ---
 
                 await asyncio.sleep(0.1)
 
             except RetryAfter as e:
                 logger.warning(f"Rate limit atingido ao enviar aviso para {user_id}. Aguardando {e.retry_after} segundos.")
                 await asyncio.sleep(e.retry_after)
-                # Tenta novamente após a espera
                 try:
-                    await bot.send_message(chat_id=user_id, text=message)
+                    await bot.send_message(
+                        chat_id=user_id,
+                        text=message,
+                        reply_markup=reply_markup,
+                        parse_mode=ParseMode.MARKDOWN
+                    )
                     await asyncio.to_thread(
                         lambda: supabase.table('subscriptions')
                         .update({'expiry_warning_sent': True})
@@ -131,8 +165,7 @@ async def find_and_process_expiring_subscriptions(supabase: Client, bot: Bot):
                 except Exception as e_inner:
                     logger.error(f"Falha ao reenviar aviso para {user_id} após retry: {e_inner}")
             except (Forbidden, BadRequest):
-                logger.warning(f"Não foi possível enviar aviso para o usuário {user_id} (bloqueou o bot?). Marcando como enviado para não tentar de novo.")
-                # Mesmo que o bot esteja bloqueado, marcamos como enviado para não continuar tentando
+                logger.warning(f"Não foi possível enviar aviso para o usuário {user_id} (bloqueou o bot?). Marcando como enviado.")
                 await asyncio.to_thread(
                     lambda: supabase.table('subscriptions')
                     .update({'expiry_warning_sent': True})
@@ -144,11 +177,10 @@ async def find_and_process_expiring_subscriptions(supabase: Client, bot: Bot):
 
 
 async def find_and_process_expired_subscriptions(supabase: Client, bot: Bot):
-    """Encontra assinaturas vencidas, remove os usuários e atualiza o status."""
+    """Encontra assinaturas vencidas, remove os usuários e envia mensagem COM BOTÕES."""
     try:
         now_iso = datetime.now(TIMEZONE_BR).isoformat()
 
-        # Modificamos a consulta para trazer também o product_id
         expired_response = await asyncio.to_thread(
             lambda: supabase.table('subscriptions')
             .select('id, product_id, user:users(telegram_user_id)')
@@ -173,42 +205,82 @@ async def find_and_process_expired_subscriptions(supabase: Client, bot: Bot):
 
             logger.info(f"Processando expiração para o usuário {user_id} (assinatura {sub_id}).")
 
-            # A remoção dos grupos é a mesma para todos
+            # Remove dos grupos
             removed_count = await kick_user_from_all_groups(user_id, bot)
 
-            # Marca a assinatura como 'expired' no banco de dados
+            # Marca como expirada
             await asyncio.to_thread(
                 lambda: supabase.table('subscriptions').update({'status': 'expired'}).eq('id', sub_id).execute()
             )
             logger.info(f"Assinatura {sub_id} do usuário {user_id} marcada como 'expired'. Removido de {removed_count} grupos.")
 
-            # --- LÓGICA CONDICIONAL PARA A MENSAGEM ---
+            # Mensagens personalizadas com botões
             try:
                 if product_id == TRIAL_PRODUCT_ID:
-                    # Mensagem personalizada para o fim da degustação
+                    # Mensagem para fim da degustação
                     product_monthly = await db.get_product_by_id(PRODUCT_ID_MONTHLY)
                     product_lifetime = await db.get_product_by_id(PRODUCT_ID_LIFETIME)
 
                     text = (
-                        "Seu período de degustação de 30 minutos acabou! ✨\n\n"
-                        "Gostou do que viu? Garanta seu acesso permanente e não perca nenhuma novidade. "
-                        "Escolha um de nossos planos abaixo para continuar na comunidade:"
+                        "✨ *Seu período de degustação acabou!*\n\n"
+                        "Esperamos que você tenha gostado do conteúdo! 🎉\n\n"
+                        "Para continuar aproveitando nossos grupos exclusivos, "
+                        "escolha um dos planos abaixo:"
                     )
+
                     keyboard = [
-                        [InlineKeyboardButton(f"✅ Assinatura Mensal (R$ {product_monthly['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_MONTHLY}')],
-                        [InlineKeyboardButton(f"💎 Acesso Vitalício (R$ {product_lifetime['price']:.2f})", callback_data=f'pay_{PRODUCT_ID_LIFETIME}')]
+                        [InlineKeyboardButton(
+                            f"📅 Mensal - R$ {product_monthly['price']:.2f}",
+                            callback_data=f'pay_{PRODUCT_ID_MONTHLY}'
+                        )],
+                        [InlineKeyboardButton(
+                            f"💎 Vitalício - R$ {product_lifetime['price']:.2f}",
+                            callback_data=f'pay_{PRODUCT_ID_LIFETIME}'
+                        )],
+                        [InlineKeyboardButton(
+                            "📋 Ver Todos os Planos",
+                            callback_data='menu_view_plans'
+                        )],
+                        [InlineKeyboardButton(
+                            "🏠 Menu Principal",
+                            callback_data='menu_main'
+                        )]
                     ]
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                    await bot.send_message(chat_id=user_id, text=text, reply_markup=reply_markup)
                 else:
-                    # Mensagem padrão para assinaturas pagas
-                    text = "Sua assinatura expirou e seu acesso aos grupos foi removido. Para voltar, use o comando /renovar."
-                    await bot.send_message(chat_id=user_id, text=text)
+                    # Mensagem para assinatura paga expirada
+                    text = (
+                        "⏰ *Sua assinatura expirou*\n\n"
+                        "Sentiremos sua falta! Para voltar a ter acesso aos nossos "
+                        "grupos exclusivos, renove sua assinatura agora mesmo."
+                    )
+
+                    keyboard = [
+                        [InlineKeyboardButton(
+                            "🔄 Renovar Assinatura",
+                            callback_data='menu_view_plans'
+                        )],
+                        [InlineKeyboardButton(
+                            "📊 Ver Status",
+                            callback_data='menu_subscription_status'
+                        )],
+                        [InlineKeyboardButton(
+                            "🏠 Menu Principal",
+                            callback_data='menu_main'
+                        )]
+                    ]
+
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+
             except (Forbidden, BadRequest):
-                logger.warning(f"Não foi possível notificar o usuário {user_id} sobre a expiração (bloqueou o bot?).")
+                logger.warning(f"Não foi possível notificar o usuário {user_id} sobre a expiração.")
             except Exception as e:
                 logger.error(f"Erro ao enviar mensagem de expiração para {user_id}: {e}")
-            # --- FIM DA LÓGICA CONDICIONAL ---
 
     except Exception as e:
         logger.error(f"Erro CRÍTICO no processo de expiração: {e}", exc_info=True)
