@@ -154,7 +154,7 @@ async def handle_get_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Chama a função centralizada para enviar os links
         await send_access_links(context.bot, user_id, subscription.get('mp_payment_id', 'manual_request'), access_type='support')
         # Informa que o processo foi iniciado (a mensagem com os links chega separada)
-        await query.edit_message_text("✅ Links enviados para o seu privado!")
+        await query.edit_message_text("✅ Prontinho!")
     else:
         await query.edit_message_text(
             "❌ Você não possui uma assinatura ativa no momento.\n\n"
@@ -458,8 +458,10 @@ async def show_referral_program(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
 
-    user_id = update.effective_user.id
-    user_db = await db.get_user_by_telegram_id(user_id)
+    # Primeiro, definimos a variável 'user' com os dados de quem clicou no botão.
+    user = update.effective_user
+
+    user_db = await db.get_user_by_telegram_id(user.id)
 
     if not user_db:
         await query.edit_message_text(
@@ -470,22 +472,18 @@ async def show_referral_program(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return
 
-    # --- LÓGICA DE CORREÇÃO APLICADA AQUI ---
-    # 1. Gera o código de forma determinística
+    # Agora o restante do código funciona, pois a variável 'user' existe.
     referral_code = f"REF{user.id}"
-
-    # 2. Garante que ele exista no banco de dados
     await db.ensure_referral_code_exists(user.id, referral_code)
-    # --- FIM DA CORREÇÃO ---
 
     # Busca estatísticas de indicações
     referrals_count = await db.count_user_referrals(user_db['id'])
 
     text = (
         f"{EMOJI['referral']} *Programa de Indicação*\n\n"
-        f"Indique amigos e ganhe *7 dias de acesso grátis* para cada amigo que assinar!\n\n" # Texto melhorado
+        f"Indique amigos e ganhe *7 dias de acesso grátis* para cada amigo que assinar!\n\n"
         f"📋 *Seu código:* `{referral_code}`\n"
-        f"👥 *Indicações convertidas:* {referrals_count}\n\n" # Texto melhorado
+        f"👥 *Indicações convertidas:* {referrals_count}\n\n"
         f"🎁 *Como funciona:*\n"
         f"1. Compartilhe seu código com amigos.\n"
         f"2. Eles usam o código no comando /cupom.\n"
@@ -549,7 +547,7 @@ async def handle_support_payment(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
 
     # Cole aqui a mesma informação de contato que você usa em outros lugares
-    usuario_suporte = "@seu_usuario_de_suporte"
+    usuario_suporte = "@sirigueijo"
     texto = (
         f"💡 *Ajuda com Pagamento*\n\n"
         f"Se você teve algum problema com o pagamento via PIX automático, "
@@ -693,7 +691,7 @@ async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
 
-    # Busca cupons ativos
+    # Busca cupons ativos (usando a função que corrigimos anteriormente)
     coupons = await db.get_active_coupons()
 
     if not coupons:
@@ -715,24 +713,35 @@ async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE
 
             # Calcula informações do cupom
             if coupon['discount_type'] == 'percentage':
-                discount_text = f"{coupon['discount_value']:.0f}%"
+                discount_text = f"{int(coupon['discount_value'])}%"
             else:
                 discount_text = f"R$ {coupon['discount_value']:.2f}"
 
-            # Validade
-            valid_until = datetime.fromisoformat(coupon['valid_until'])
-            days_left = (valid_until - datetime.now(TIMEZONE_BR)).days
+            # --- INÍCIO DA CORREÇÃO ---
+            # Validade (Lógica aprimorada para lidar com cupons sem data de expiração)
+            valid_until_str = coupon.get('valid_until')
+            if valid_until_str:
+                valid_until = datetime.fromisoformat(valid_until_str)
+                days_left = (valid_until - datetime.now(TIMEZONE_BR)).days
 
-            if days_left == 0:
-                validity_text = "⏰ Expira hoje!"
-            elif days_left == 1:
-                validity_text = "⏰ Expira amanhã"
+                if days_left < 0:
+                    validity_text = "📅 Expirado"
+                elif days_left == 0:
+                    validity_text = "⏰ Expira hoje!"
+                elif days_left == 1:
+                    validity_text = "⏰ Expira amanhã!"
+                else:
+                    validity_text = f"📅 Válido por mais {days_left} dias"
             else:
-                validity_text = f"📅 Válido por {days_left} dias"
+                # Caso o cupom não tenha data de expiração (valid_until é None)
+                validity_text = "📅 Válido indefinidamente"
+            # --- FIM DA CORREÇÃO ---
+
 
             # Usos disponíveis
-            if coupon.get('usage_limit'):
-                uses_left = coupon['usage_limit'] - coupon.get('usage_count', 0)
+            usage_limit = coupon.get('usage_limit')
+            if usage_limit:
+                uses_left = usage_limit - coupon.get('usage_count', 0)
                 usage_text = f"🎟️ {uses_left} usos restantes"
             else:
                 usage_text = "🎟️ Usos ilimitados"
@@ -748,7 +757,7 @@ async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE
             # Adiciona ao texto
             text += (
                 f"{status_emoji} *{coupon['code']}*\n"
-                f"💰 Desconto: {discount_text}\n"
+                f"💰 Desconto: *{discount_text}*\n"
                 f"{validity_text} | {usage_text}\n"
                 f"_{status_text}_\n\n"
             )
@@ -757,7 +766,7 @@ async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE
             if not already_used:
                 keyboard.append([
                     InlineKeyboardButton(
-                        f"📋 Copiar: {coupon['code']}",
+                        f"📋 Copiar Cupom: {coupon['code']}",
                         callback_data=f"copy_coupon_{coupon['code']}"
                     )
                 ])
@@ -765,12 +774,14 @@ async def show_active_coupons(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Informação de como usar
         text += (
             "\n💡 *Como usar:*\n"
-            "1. Escolha seu plano em 'Ver Planos'\n"
-            "2. Clique em 'Tenho um Cupom'\n"
-            "3. Digite o código do cupom\n"
-            "4. Pronto! O desconto será aplicado"
+            "1. Copie o código do cupom.\n"
+            "2. Volte ao menu e clique em 'Ver Planos'.\n"
+            "3. Clique em 'Tenho um Cupom de Desconto'.\n"
+            "4. Envie o código na mensagem.\n"
+            "5. Pronto! O desconto será aplicado."
         )
 
+        keyboard.append([InlineKeyboardButton(f"{EMOJI['buy']} Ver Planos", callback_data='menu_view_plans')])
         keyboard.append([InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -815,10 +826,7 @@ def register_menu_handlers(application):
     # Comando /start
     application.add_handler(CommandHandler("start", start_command))
 
-    # Callbacks de menu (padrão menu_*)
-    application.add_handler(CallbackQueryHandler(
-        handle_menu_callback,
-        pattern='^menu_'
-    ))
+    # A função handle_menu_callback agora vai receber TODOS os cliques
+    application.add_handler(CallbackQueryHandler(handle_menu_callback))
 
     logger.info("✅ Handlers de menu registrados com sucesso!")
