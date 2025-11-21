@@ -226,8 +226,6 @@ async def show_subscription_status(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
 
     user_id = update.effective_user.id
-
-    # Busca informações do usuário e assinatura ativa
     user_db = await db.get_user_by_telegram_id(user_id)
     if not user_db:
         await query.edit_message_text(
@@ -246,63 +244,65 @@ async def show_subscription_status(update: Update, context: ContextTypes.DEFAULT
             "Você ainda não possui uma assinatura ativa.\n"
             "Escolha um dos nossos planos para começar!"
         )
-
-        # --- INÍCIO DA CORREÇÃO ---
-        # Busca a configuração da oferta de degustação no banco de dados.
         trial_setting = await db.get_setting('trial_offer')
         is_trial_enabled = trial_setting and trial_setting.get('enabled', False)
-
-        # Monta o teclado dinamicamente
         keyboard = [
             [InlineKeyboardButton(f"{EMOJI['buy']} Ver Planos", callback_data='menu_view_plans')]
         ]
-        # Adiciona o botão de degustação APENAS se estiver ativado
         if is_trial_enabled:
-            # Verifica se o usuário já usou o trial antes de mostrar o botão
             has_trial = await db.user_has_trial_subscription(user_db['id'])
             if not has_trial:
                  keyboard.append([InlineKeyboardButton(f"{EMOJI['trial']} Testar Grátis", callback_data='menu_trial')])
-
         keyboard.append([InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')])
-        # --- FIM DA CORREÇÃO ---
 
-
-    else:
-        # Busca informações do produto
+    else: # O usuário TEM uma assinatura ativa
         product = await db.get_product_by_id(subscription['product_id'])
 
-        # Calcula dias restantes
-        end_date = datetime.fromisoformat(subscription['end_date'])
-        days_left = (end_date - datetime.now(TIMEZONE_BR)).days
-
-        # Status visual
-        if days_left > 7:
-            status_emoji = EMOJI['check']
-            status_text = "Ativa"
-        elif days_left > 0:
-            status_emoji = EMOJI['clock']
-            status_text = f"Expira em {days_left} dia(s)"
+        # --- INÍCIO DA CORREÇÃO PRINCIPAL ---
+        # PRIMEIRO, verificamos se a data de término existe.
+        if not subscription.get('end_date'):
+            # Se NÃO existir, é um plano VITALÍCIO.
+            status_emoji = '💎'
+            status_text = "Vitalício"
+            text = (
+                f"📊 *Status da Assinatura*\n\n"
+                f"🏷️ *Plano:* {product['name']}\n"
+                f"{status_emoji} *Status:* {status_text}\n"
+                f"📅 *Início:* {format_date_br(subscription['start_date'])}\n"
+            )
         else:
-            status_emoji = EMOJI['cross']
-            status_text = "Expirada"
+            # Se a data de término EXISTE, é um plano com prazo. Agora é seguro calcular.
+            end_date = datetime.fromisoformat(subscription['end_date'])
+            days_left = (end_date - datetime.now(TIMEZONE_BR)).days
 
-        text = (
-            f"📊 *Status da Assinatura*\n\n"
-            f"🏷️ *Plano:* {product['name']}\n"
-            f"{status_emoji} *Status:* {status_text}\n"
-            f"📅 *Início:* {format_date_br(subscription['start_date'])}\n"
-            f"📅 *Término:* {format_date_br(subscription['end_date'])}\n"
-        )
-
-        if subscription.get('original_price') and subscription.get('final_price'):
-            if subscription['original_price'] != subscription['final_price']:
-                text += f"\n💰 *Valor Pago:* R$ {subscription['final_price']:.2f} (desconto aplicado)"
+            if days_left > 7:
+                status_emoji = EMOJI['check']
+                status_text = "Ativa"
+            elif days_left >= 0: # Usamos >= para incluir o dia do vencimento
+                status_emoji = EMOJI['clock']
+                status_text = f"Expira em {days_left} dia(s)"
             else:
+                status_emoji = EMOJI['cross']
+                status_text = "Expirada"
+
+            text = (
+                f"📊 *Status da Assinatura*\n\n"
+                f"🏷️ *Plano:* {product['name']}\n"
+                f"{status_emoji} *Status:* {status_text}\n"
+                f"📅 *Início:* {format_date_br(subscription['start_date'])}\n"
+                f"📅 *Término:* {format_date_br(subscription['end_date'])}\n"
+            )
+        # --- FIM DA CORREÇÃO PRINCIPAL ---
+
+        if subscription.get('final_price') is not None:
+             if subscription.get('original_price') and subscription['original_price'] != subscription['final_price']:
+                text += f"\n💰 *Valor Pago:* R$ {subscription['final_price']:.2f} (desconto aplicado)"
+             else:
                 text += f"\n💰 *Valor Pago:* R$ {subscription['final_price']:.2f}"
 
         keyboard = [
             [InlineKeyboardButton(f"{EMOJI['renew']} Renovar/Estender", callback_data='menu_view_plans')],
-            [InlineKeyboardButton(f"{EMOJI['link']} Obter Links dos Grupos", callback_data='menu_get_links')],
+            [InlineKeyboardButton(f"{EMOJI['link']} Obter Links dos Canais", callback_data='menu_get_links')],
             [InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')]
         ]
 
