@@ -455,13 +455,12 @@ async def show_my_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Verifica se tem assinatura ativa
     subscription = await db.get_active_subscription(user_db['id'])
 
     if not subscription:
         text = (
             "📭 *Você não possui acesso ativo*\n\n"
-            "Para acessar nossos grupos exclusivos, você precisa de uma assinatura ativa.\n"
+            "Para acessar nossos canais exclusivos, você precisa de uma assinatura ativa.\n"
             "Experimente grátis por 30 minutos ou escolha um plano!"
         )
         keyboard = [
@@ -470,26 +469,36 @@ async def show_my_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')]
         ]
     else:
-        # Calcula dias restantes
-        end_date = datetime.fromisoformat(subscription['end_date'])
-        time_left = end_date - datetime.now(TIMEZONE_BR)
-
-        if time_left.days > 0:
-            time_text = f"{time_left.days} dia(s)"
+        # --- INÍCIO DA CORREÇÃO ---
+        time_text = ""
+        # 1. Verifica de forma segura se a data de término existe
+        if not subscription.get('end_date'):
+            # 2. Se não existir, é um plano VITALÍCIO
+            time_text = "Vitalício 💎"
         else:
-            hours_left = time_left.seconds // 3600
-            minutes_left = (time_left.seconds % 3600) // 60
-            time_text = f"{hours_left}h {minutes_left}min"
+            # 3. Se existir, agora é seguro fazer o cálculo
+            end_date = datetime.fromisoformat(subscription['end_date'])
+            time_left = end_date - datetime.now(TIMEZONE_BR)
+
+            if time_left.total_seconds() <= 0:
+                time_text = "Expirado"
+            elif time_left.days > 0:
+                time_text = f"{time_left.days} dia(s)"
+            else:
+                hours_left = time_left.seconds // 3600
+                minutes_left = (time_left.seconds % 3600) // 60
+                time_text = f"{hours_left}h {minutes_left}min"
+        # --- FIM DA CORREÇÃO ---
 
         text = (
-            f"{EMOJI['groups']} *Seus Grupos de Acesso*\n\n"
+            f"{EMOJI['groups']} *Seus Canais de Acesso*\n\n"
             f"✅ Você tem acesso ativo!\n"
-            f"⏰ Tempo restante: {time_text}\n\n"
-            f"Clique no botão abaixo para receber os links de acesso a todos os grupos.\n\n"
+            f"⏰ Tempo restante: *{time_text}*\n\n"
+            f"Clique no botão abaixo para receber os links de acesso a todos os canais.\n\n"
             f"⚠️ *Importante:*\n"
             f"• Os links expiram em 2 horas\n"
             f"• Cada link só pode ser usado uma vez\n"
-            f"• Entre em até 3 grupos por vez (aguarde ~30min entre lotes)"
+            f"• Entre em até 3 canais por vez (aguarde ~30min entre lotes)"
         )
         keyboard = [
             [InlineKeyboardButton(
