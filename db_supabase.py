@@ -996,29 +996,32 @@ async def get_product_by_id(product_id: int) -> dict:
 
 async def get_active_subscription(user_id: int) -> dict:
     """
-    Busca a assinatura ativa do usuário.
-
-    Args:
-        user_id: ID interno do usuário no banco
-
-    Returns:
-        Dicionário com a assinatura ativa ou None
+    Busca a assinatura ativa do usuário, considerando planos com data de término e vitalícios.
     """
     supabase = get_supabase_client()
-    now = datetime.now().isoformat()
+    now = datetime.now(TIMEZONE_BR).isoformat()
 
-    response = await asyncio.to_thread(
-        lambda: supabase.table('subscriptions')
-        .select('*')
-        .eq('user_id', user_id)
-        .eq('status', 'active')
-        .gt('end_date', now)
-        .order('end_date', desc=True)
-        .limit(1)
-        .execute()
-    )
+    try:
+        # --- INÍCIO DA CORREÇÃO ---
+        # A consulta agora usa .or_() para verificar duas condições:
+        # 1. end_date é maior que agora (planos normais)
+        # 2. end_date é nulo (planos vitalícios)
+        response = await asyncio.to_thread(
+            lambda: supabase.table('subscriptions')
+            .select('*')
+            .eq('user_id', user_id)
+            .eq('status', 'active')
+            .or_(f'end_date.gt.{now},end_date.is.null') # A MÁGICA ACONTECE AQUI
+            .order('created_at', desc=True) # Ordena pela mais recente em caso de anomalias
+            .limit(1)
+            .execute()
+        )
+        # --- FIM DA CORREÇÃO ---
 
-    return response.data[0] if response.data else None
+        return response.data[0] if response.data else None
+    except Exception as e:
+        logger.error(f"Erro ao buscar assinatura ativa para user_id {user_id}: {e}", exc_info=True)
+        return None
 
 
 async def get_all_group_ids() -> list:

@@ -246,11 +246,27 @@ async def show_subscription_status(update: Update, context: ContextTypes.DEFAULT
             "Você ainda não possui uma assinatura ativa.\n"
             "Escolha um dos nossos planos para começar!"
         )
+
+        # --- INÍCIO DA CORREÇÃO ---
+        # Busca a configuração da oferta de degustação no banco de dados.
+        trial_setting = await db.get_setting('trial_offer')
+        is_trial_enabled = trial_setting and trial_setting.get('enabled', False)
+
+        # Monta o teclado dinamicamente
         keyboard = [
-            [InlineKeyboardButton(f"{EMOJI['buy']} Ver Planos", callback_data='menu_view_plans')],
-            [InlineKeyboardButton(f"{EMOJI['trial']} Testar Grátis (30 min)", callback_data='menu_trial')],
-            [InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')]
+            [InlineKeyboardButton(f"{EMOJI['buy']} Ver Planos", callback_data='menu_view_plans')]
         ]
+        # Adiciona o botão de degustação APENAS se estiver ativado
+        if is_trial_enabled:
+            # Verifica se o usuário já usou o trial antes de mostrar o botão
+            has_trial = await db.user_has_trial_subscription(user_db['id'])
+            if not has_trial:
+                 keyboard.append([InlineKeyboardButton(f"{EMOJI['trial']} Testar Grátis", callback_data='menu_trial')])
+
+        keyboard.append([InlineKeyboardButton(f"{EMOJI['back']} Voltar", callback_data='menu_main')])
+        # --- FIM DA CORREÇÃO ---
+
+
     else:
         # Busca informações do produto
         product = await db.get_product_by_id(subscription['product_id'])
@@ -835,7 +851,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             image_stream = io.BytesIO(qr_code_image)
             await context.bot.send_photo(chat_id=chat_id, photo=image_stream, caption="Use o QR Code acima ou o código abaixo para pagar.")
             await context.bot.send_message(chat_id=chat_id, text=f"PIX Copia e Cola:\n\n`{payment_data['pix_copy_paste']}`", parse_mode=ParseMode.MARKDOWN_V2)
-            await context.bot.send_message(chat_id=chat_id, text="✅ Pagamento confirmado? Você receberá os links de acesso em instantes!")
+            await context.bot.send_message(chat_id=chat_id, text="Você receberá os links de acesso em instantes! Logo após a confirmação do pagamento ✅")
             context.user_data.clear()
         else:
             await query.edit_message_text(text="❌ Erro ao gerar sua cobrança. Tente novamente ou contate o suporte.")
